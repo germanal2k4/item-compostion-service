@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package reaction.internal;
+
+message GetReactionCountersByDomainIdRequest {
+  string domain = 4;
+  // Идентификатор домена
+  repeated string domain_ids = 2;
+  // Идентификатор авторизованного пользователя
+  string principal_id = 3;
+}
+
+message GetReactionCountersByDomainIdResponse {
+  repeated Item items = 1;
+
+  message Item {
+    // Идентификатор домена
+    string domain_id = 1;
+    // Количество реакций по идентификатору домена
+    int32 total_count = 2;
+    // Тип проставленной реакции авторизованным пользователем
+    string my_reaction = 3;
+    // Количество реакций по типу реакции
+    repeated ReactionsCount reactions_count = 4;
+  }
+
+  message ReactionsCount {
+    //
+    string type = 1;
+    int32 count = 2;
+  }
+}
+
+service ReactionInternalService {
+  rpc GetReactionCountersByDomainId(GetReactionCountersByDomainIdRequest) returns (GetReactionCountersByDomainIdResponse);
+}
