@@ -17,9 +17,6 @@ item-composition-service/
 |   ├── config.yaml                 # Program configuration files
 │   └── envs                        # Enviroments 
 |
-├── deployment/
-│   └── Dockerfile                  # Deployment files
-|
 ├── docs/                           # Programm documentation
 |
 ├── internal/
@@ -39,6 +36,7 @@ item-composition-service/
 |   
 ├── test                            # Tests
 ├── docker-compose.yaml             
+├── Dockerfile                      # Deployment file
 ├── go.mod                          # Go module dependencies
 ├── Makefile                        # Launch scripts
 └── README.md                       # Project overview
