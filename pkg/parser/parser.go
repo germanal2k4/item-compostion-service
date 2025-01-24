@@ -103,27 +103,28 @@ func combineTemplates(t *TemplateInstructionsImpl, templateSet map[string]struct
 			if metadataName, ok := metadataValue.(string); ok {
 				if _, exists := templateSet[metadataName]; exists {
 					processedTemplate := processTemplate(instr.Spec, item, context)
-					combinedResult = mergeMaps(combinedResult, processedTemplate)
+
+					for key, value := range processedTemplate {
+						if existingValue, exists := combinedResult[key]; exists {
+							switch existingValue.(type) {
+							case map[string]any:
+								if newMap, ok := value.(map[string]any); ok {
+									combinedResult[key] = newMap
+								} else {
+									combinedResult[key] = value
+								}
+							default:
+								combinedResult[key] = value
+							}
+						} else {
+							combinedResult[key] = value
+						}
+					}
 				}
 			}
 		}
 	}
 	return combinedResult
-}
-
-func mergeMaps(dest, src map[string]any) map[string]any {
-	for key, value := range src {
-		if nestedSrc, ok := value.(map[string]any); ok {
-			if nestedDest, exists := dest[key].(map[string]any); exists {
-				dest[key] = mergeMaps(nestedDest, nestedSrc)
-			} else {
-				dest[key] = nestedSrc
-			}
-		} else {
-			dest[key] = value
-		}
-	}
-	return dest
 }
 
 func processTemplate(spec map[string]any, item map[string]any, context map[string]any) map[string]any {
@@ -153,7 +154,10 @@ func processMapValue(key string, val map[string]any, result map[string]any, item
 		if t, ok := typeValue.(string); ok {
 			switch t {
 			case "string":
-				processStringValue(key, val, result, item, context)
+				err := processStringValue(key, val, result, item, context)
+				if err != nil {
+					// TODO: Log warning about wrong path of json
+				}
 			case "object":
 				result[key] = processTemplate(val, item, context)
 			case "number":
@@ -175,7 +179,9 @@ func processMapValue(key string, val map[string]any, result map[string]any, item
 	}
 }
 
-func processStringValue(key string, val map[string]any, result map[string]any, item map[string]any, context map[string]any) {
+func processStringValue(key string, val map[string]any, result map[string]any, item map[string]any, context map[string]any) error {
+	var errList []error
+
 	if pathValue, exists := val["path"]; exists {
 		if path, ok := pathValue.(string); ok {
 			resolvedValue, err := gval.Evaluate(path, map[string]interface{}{
@@ -183,23 +189,33 @@ func processStringValue(key string, val map[string]any, result map[string]any, i
 				"context": context,
 			})
 			if err != nil {
-				// TODO: Log error resolving path
+				errList = append(errList, fmt.Errorf("error resolving path for key %s: %w", key, err))
 				result[key] = nil
 			} else {
 				result[key] = resolvedValue
 			}
+		} else {
+			errList = append(errList, fmt.Errorf("path value is not a string for key: %s", key))
 		}
 	} else if tmplValue, exists := val["value"]; exists {
 		if tmpl, ok := tmplValue.(string); ok {
 			interpolated, err := interpolateString(tmpl, item, context)
 			if err != nil {
-				// TODO: Log error interpolating string
+				errList = append(errList, fmt.Errorf("error interpolating string for key %s: %w", key, err))
 				result[key] = tmpl
 			} else {
 				result[key] = interpolated
 			}
+		} else {
+			errList = append(errList, fmt.Errorf("value is not a string for key: %s", key))
 		}
 	}
+
+	if len(errList) > 0 {
+		return errors.Join(errList...)
+	}
+
+	return nil
 }
 
 func processNumberValue(key string, val map[string]any, result map[string]any, item map[string]any, context map[string]any) {

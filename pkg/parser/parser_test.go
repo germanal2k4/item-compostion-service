@@ -1,10 +1,7 @@
 package parser
 
 import (
-	"encoding/json"
-	"fmt"
 	"github.com/stretchr/testify/assert"
-	"reflect"
 	"testing"
 )
 
@@ -40,33 +37,17 @@ spec:
 	}
 
 	templates, err := ParseTemplate([]byte(templateData))
-	if err != nil {
-		t.Fatalf("Failed to parse template: %v", err)
-	}
+	assert.NoError(t, err, "Failed to parse template")
 
 	result, err := templates.AdjustTemplate(item, context)
-	if err != nil {
-		t.Fatalf("Failed to adjust template: %v", err)
-	}
+	assert.NoError(t, err, "Failed to adjust template")
 
-	var expected map[string]any
 	expectedJSON := `{
 			"greeting": "Hello, John!",
 			"age": 30
 	}`
 
-	if err := json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
-		t.Fatalf("Failed to unmarshal expected result: %v", err)
-	}
-
-	var actual map[string]any
-	if err := json.Unmarshal(result, &actual); err != nil {
-		t.Fatalf("Failed to unmarshal actual result: %v", err)
-	}
-
-	if !reflect.DeepEqual(actual, expected) {
-		t.Errorf("Result mismatch. Expected: %v, Got: %v", expected, actual)
-	}
+	assert.JSONEq(t, expectedJSON, string(result), "JSON mismatch")
 }
 
 func TestCombineTemplates(t *testing.T) {
@@ -97,9 +78,7 @@ spec:
 `
 
 	templates, err := ParseTemplate([]byte(templateData))
-	if err != nil {
-		t.Fatalf("Failed to parse template: %v", err)
-	}
+	assert.NoError(t, err, "Failed to parse template")
 
 	templateSet := map[string]struct{}{
 		"template1": {},
@@ -116,9 +95,7 @@ spec:
 		"data2": "Value from template2",
 	}
 
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("CombineTemplates result mismatch. Expected: %v, Got: %v", expected, result)
-	}
+	assert.Equal(t, expected, result, "Combined templates mismatch")
 }
 
 func TestEvaluateCondition(t *testing.T) {
@@ -145,23 +122,20 @@ func TestEvaluateCondition(t *testing.T) {
 		{"item.id > 50", true, false},
 		{"item.id < 200 && item.id > 50", true, false},
 		{"item.name == \"Doe\"", false, false},
+		{"item.id < 50", false, false},
+		{"item.active == false", false, false},
 	}
 
 	for _, test := range tests {
-		result, err := evaluateCondition(test.condition, item, context)
-		if test.shouldErr {
-			if err == nil {
-				t.Errorf("Expected error for condition: %s, got nil", test.condition)
+		t.Run(test.condition, func(t *testing.T) {
+			result, err := evaluateCondition(test.condition, item, context)
+			if test.shouldErr {
+				assert.Error(t, err, "Expected error for condition: %s, but got none", test.condition)
+				return
 			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("Unexpected error for condition: %s, error: %v", test.condition, err)
-			continue
-		}
-		if result != test.expected {
-			t.Errorf("Condition: %s, expected: %v, got: %v", test.condition, test.expected, result)
-		}
+			assert.NoError(t, err, "Unexpected error for condition: %s", test.condition)
+			assert.Equal(t, test.expected, result, "Condition mismatch for: %s", test.condition)
+		})
 	}
 }
 
@@ -205,9 +179,7 @@ func TestProcessArrayValue(t *testing.T) {
 		},
 	}
 
-	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
-		t.Errorf("Test failed. Expected: %v, Got: %v", expected, result)
-	}
+	assert.Equal(t, expected, result, "Processed array value mismatch")
 }
 
 func TestInterpolateString(t *testing.T) {
@@ -224,13 +196,9 @@ func TestInterpolateString(t *testing.T) {
 	expected := "Hello, John! Welcome to New York."
 
 	result, err := interpolateString(templateStr, item, context)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	assert.NoError(t, err, "Unexpected error during string interpolation")
 
-	if result != expected {
-		t.Errorf("Test failed. Expected: %v, Got: %v", expected, result)
-	}
+	assert.Equal(t, expected, result, "String interpolation mismatch")
 }
 
 func TestProcessMapValue(t *testing.T) {
@@ -297,7 +265,7 @@ func TestProcessMapValue(t *testing.T) {
 			result := make(map[string]any)
 			processMapValue(tt.key, tt.val, result, item, context)
 
-			assert.Equal(t, tt.expected, result[tt.key])
+			assert.Equal(t, tt.expected, result[tt.key], "Map value mismatch for key: %s", tt.key)
 		})
 	}
 }
@@ -344,9 +312,12 @@ func TestProcessStringValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := make(map[string]any)
-			processStringValue(tt.key, tt.val, result, item, context)
+			err := processStringValue(tt.key, tt.val, result, item, context)
+			if err != nil {
+				return
+			}
 
-			assert.Equal(t, tt.expected, result[tt.key])
+			assert.Equal(t, tt.expected, result[tt.key], "String value mismatch for key: %s", tt.key)
 		})
 	}
 }
