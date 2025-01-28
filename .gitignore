@@ -2,3 +2,4 @@
 /.idea
 
 /cmd/app
+internal/generated
