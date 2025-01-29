@@ -1,0 +1,11 @@
+grpc_server:
+    listen_address: :8080
+    logging:
+        disable: false
+        disable_enrich_traces: false
+        disable_log_request_message: false
+        disable_log_response_message: false
+        log_level: debug
+    start_deadline: 5s
+    stop_deadline: 5s
+    unix_socket_user: ""

@@ -24,7 +24,9 @@ item-composition-service/
 │   ├── entities/                   # Domain types
 │   ├── generated/                  # Codegen files
 │   ├── repository/                 # Database access layer
-│   └── services/                   # Business logic
+│   ├── server/                     # gRPC server implementation
+│   ├── services/                   # Business logic
+│   └── setup/                      # Application setup
 |
 ├── migrations/                     # Database migrations
 |
