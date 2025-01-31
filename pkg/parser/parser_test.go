@@ -2,9 +2,8 @@ package parser
 
 import (
 	"context"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 func TestParseTemplate_Success(t *testing.T) {
@@ -24,10 +23,12 @@ spec:
   greeting:
     type: "string"
     value: "Hello!"
+
 `
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Expected no error when parsing valid YAML")
-	assert.Len(t, tpls.instructions, 2, "Should parse 2 instructions (View + Template)")
+	assert.Len(t, tpls, 2, "Should parse 2 instructions (View + Template)")
 }
 
 func TestAdjustTemplate_Simple(t *testing.T) {
@@ -51,18 +52,17 @@ spec:
     type: "number"
     path: "item.code"
 `
-
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Should parse template without error")
 
 	itemMap := map[string]any{"name": "World", "code": 42}
 	dataMap := map[string]any{}
 
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, itemMap)
 	ctx = context.WithValue(ctx, DataKey, dataMap)
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, itemMap, tpls)
 	assert.NoError(t, err, "AdjustTemplate should succeed")
 
 	expected := `{
@@ -83,14 +83,14 @@ spec:
     type: "string"
     value: "No view here"
 `
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
-
+	item := map[string]any{"foo": "bar"}
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, map[string]any{"foo": "bar"})
 	ctx = context.WithValue(ctx, DataKey, map[string]any{"test": "value"})
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
 	assert.NoError(t, err, "Should not fail, but produce empty result")
 
 	assert.JSONEq(t, `{}`, string(resultJSON), "Expected empty JSON when no View instructions")
@@ -113,13 +113,13 @@ spec:
     type: "string"
     value: "Will not appear"
 `
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
-
+	item := map[string]any{"enabled": false}
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, map[string]any{"enabled": false})
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
 	assert.NoError(t, err)
 
 	assert.JSONEq(t, `{}`, string(resultJSON), "View if-condition is false, so result should be empty")
@@ -154,15 +154,14 @@ spec:
     value:
       status: "primary"
 `
-
-	tpls, err := ParseTemplate([]byte(templateData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(templateData))
 	assert.NoError(t, err, "Failed to parse chained templates")
-
+	item := map[string]any{"something": 123}
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, map[string]any{"something": 123})
 	ctx = context.WithValue(ctx, DataKey, map[string]any{"another": "value"})
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
 	assert.NoError(t, err, "AdjustTemplate failed in chained merging scenario")
 
 	expectedJSON := `{
@@ -177,7 +176,7 @@ spec:
 func TestEvaluateCondition_Success(t *testing.T) {
 	item := map[string]any{"id": 42, "active": true}
 	data := map[string]any{"limit": 50}
-
+	var temp TemplateLib
 	tests := []struct {
 		cond     string
 		expected bool
@@ -192,7 +191,7 @@ func TestEvaluateCondition_Success(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		result, err := evaluateCondition(tc.cond, item, data)
+		result, err := temp.evaluateCondition(tc.cond, item, data)
 		assert.NoError(t, err, "No error expected in evaluateCondition: %s", tc.cond)
 		assert.Equal(t, tc.expected, result, "Mismatch condition: %s", tc.cond)
 	}
@@ -201,14 +200,14 @@ func TestEvaluateCondition_Success(t *testing.T) {
 func TestEvaluateCondition_Errors(t *testing.T) {
 	item := map[string]any{}
 	data := map[string]any{}
-
+	var temp TemplateLib
 	cond1 := "item.??error??"
 
-	_, err := evaluateCondition(cond1, item, data)
+	_, err := temp.evaluateCondition(cond1, item, data)
 	assert.Error(t, err, "Should fail on syntax error")
 
 	cond2 := "(((("
-	_, err = evaluateCondition(cond2, item, data)
+	_, err = temp.evaluateCondition(cond2, item, data)
 	assert.Error(t, err, "Should fail on unbalanced parens, etc.")
 }
 
@@ -220,9 +219,9 @@ func TestProcessStringValue(t *testing.T) {
 			"type":  "string",
 			"value": "Hello, {{item.name}}!",
 		}
-
+		var temp TemplateLib
 		result := make(map[string]any)
-		err := processStringValue("greeting", val, result, item, data)
+		err := temp.processStringValue("greeting", val, result, item, data)
 		assert.NoError(t, err, "No error expected in interpolation")
 
 		assert.Equal(t, "Hello, Alice!", result["greeting"], "String interpolation mismatch")
@@ -234,8 +233,9 @@ func TestProcessStringValue(t *testing.T) {
 			"type": "string",
 			"path": "item.age",
 		}
+		var temp TemplateLib
 		result := make(map[string]any)
-		err := processStringValue("userAge", val, result, item, nil)
+		err := temp.processStringValue("userAge", val, result, item, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 33, result["userAge"], "Path resolution mismatch")
 	})
@@ -245,8 +245,9 @@ func TestProcessStringValue(t *testing.T) {
 			"type": "string",
 			"path": 123,
 		}
+		var temp TemplateLib
 		result := make(map[string]any)
-		err := processStringValue("key", val, result, nil, nil)
+		err := temp.processStringValue("key", val, result, nil, nil)
 		assert.Error(t, err, "Should fail due to non-string path")
 	})
 
@@ -255,8 +256,9 @@ func TestProcessStringValue(t *testing.T) {
 			"type":  "string",
 			"value": "Hello, {{invalid}!",
 		}
+		var temp TemplateLib
 		result := make(map[string]any)
-		err := processStringValue("broken", val, result, nil, nil)
+		err := temp.processStringValue("broken", val, result, nil, nil)
 		if err != nil {
 			assert.Error(t, err, "Expected an error from invalid Go template syntax")
 		}
@@ -271,8 +273,8 @@ func TestProcessNumberValue(t *testing.T) {
 	item := map[string]any{"num": 99}
 	data := map[string]any{}
 	result := make(map[string]any)
-
-	processNumberValue("resultNumber", val, result, item, data)
+	var temp TemplateLib
+	temp.processNumberValue("resultNumber", val, result, item, data)
 	assert.Equal(t, 99, result["resultNumber"], "Should extract item.num = 99")
 
 	val2 := map[string]any{
@@ -280,7 +282,7 @@ func TestProcessNumberValue(t *testing.T) {
 		"path": "item.unknownField",
 	}
 	result2 := make(map[string]any)
-	processNumberValue("badNum", val2, result2, item, data)
+	temp.processNumberValue("badNum", val2, result2, item, data)
 	assert.Nil(t, result2["badNum"], "Unknown path => nil")
 }
 
@@ -305,9 +307,9 @@ func TestProcessArrayValue(t *testing.T) {
 				},
 			},
 		}
-
+		var temp TemplateLib
 		result := make(map[string]any)
-		processArrayValue("permissions", val, result, item, nil)
+		temp.processArrayValue("permissions", val, result, item, nil)
 		expected := map[string]any{
 			"permissions": []any{
 				map[string]any{"value": "User access granted"},
@@ -320,8 +322,9 @@ func TestProcessArrayValue(t *testing.T) {
 		val := map[string]any{
 			"value": 123,
 		}
+		var temp TemplateLib
 		result := make(map[string]any)
-		processArrayValue("arrKey", val, result, nil, nil)
+		temp.processArrayValue("arrKey", val, result, nil, nil)
 		assert.Nil(t, result["arrKey"], "Should remain nil if not a valid array")
 	})
 }
@@ -340,8 +343,8 @@ func TestApplyNestedObject(t *testing.T) {
 			"status": "active",
 		},
 	}
-
-	applyNestedObject("data1", val, combined, nil, nil)
+	var temp TemplateLib
+	temp.applyNestedObject("data1", val, combined, nil, nil)
 
 	expected := map[string]any{
 		"data1": map[string]any{
@@ -370,13 +373,13 @@ spec:
     type: "string"
     value: "Hello!"
 `
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Parsing YAML itself might still succeed since it's valid YAML syntax")
-
+	item := map[string]any{"missing": false}
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, map[string]any{"missing": false})
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
 	assert.NoError(t, err, "We skip instructions on condition error, so not a fatal error")
 
 	assert.JSONEq(t, `{}`, string(resultJSON), "Expected empty JSON if condition evaluation fails")
@@ -384,7 +387,8 @@ spec:
 
 func TestValidateKeys(t *testing.T) {
 	cond := "item.unknownField > 10"
-	err := validateKeys(cond, map[string]interface{}{
+	var temp TemplateLib
+	err := temp.validateKeys(cond, map[string]interface{}{
 		"item": map[string]any{"knownField": 5},
 	})
 
@@ -399,8 +403,8 @@ func TestInterpolateString_Error(t *testing.T) {
 	input := "Hello, {{broken"
 	item := map[string]any{}
 	data := map[string]any{}
-
-	_, err := interpolateString(input, item, data)
+	var temp TemplateLib
+	_, err := temp.interpolateString(input, item, data)
 	assert.Error(t, err, "Should fail on parse error in go template")
 }
 
@@ -408,8 +412,9 @@ func TestApplyNestedObject_NoValue(t *testing.T) {
 	val := map[string]any{
 		"type": "object",
 	}
+	var temp TemplateLib
 	combined := make(map[string]any)
-	applyNestedObject("someObj", val, combined, nil, nil)
+	temp.applyNestedObject("someObj", val, combined, nil, nil)
 
 	assert.Equal(t, val, combined["someObj"], "If no .value => store as is")
 }
@@ -431,13 +436,13 @@ spec:
     type: "string"
     value: "Value if condition passes"
 `
-	tpls, err := ParseTemplate([]byte(yamlData))
+	var temp TemplateLib
+	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
-
+	item := map[string]any{"x": 1}
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ItemKey, map[string]any{"x": 1})
 
-	resultJSON, err := tpls.AdjustTemplate(ctx)
+	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
 
 	assert.NoError(t, err, "Should not be fatal error, but might skip the view")
 
@@ -449,8 +454,9 @@ func TestProcessArrayValue_InvalidType(t *testing.T) {
 		"type":  "array",
 		"value": 123,
 	}
+	var temp TemplateLib
 	combined := make(map[string]any)
-	processArrayValue("arr", val, combined, nil, nil)
+	temp.processArrayValue("arr", val, combined, nil, nil)
 
 	assert.Nil(t, combined["arr"], "Should remain nil if not a valid array")
 }
@@ -466,9 +472,9 @@ func TestProcessArrayValue_ObjectItem(t *testing.T) {
 			},
 		},
 	}
-
+	var temp TemplateLib
 	combined := make(map[string]any)
-	processArrayValue("arr", val, combined, nil, nil)
+	temp.processArrayValue("arr", val, combined, nil, nil)
 
 	assert.Len(t, combined, 1)
 	assert.Contains(t, combined, "arr")

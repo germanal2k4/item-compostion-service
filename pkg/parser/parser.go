@@ -16,10 +16,11 @@ import (
 type contextKey string
 
 const (
-	ItemKey contextKey = "item"
 	DataKey contextKey = "data"
 )
 
+type TemplateLib struct {
+}
 type Instruction struct {
 	Kind     string         `yaml:"kind"`
 	Version  string         `yaml:"version"`
@@ -28,12 +29,8 @@ type Instruction struct {
 	If       string         `yaml:"if,omitempty"`
 }
 
-type TemplateInstructionsImpl struct {
-	instructions []Instruction
-}
-
-func ParseTemplate(templateData []byte) (*TemplateInstructionsImpl, error) {
-	var instructions []Instruction
+func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) {
+	var tmpInstructions []Instruction
 	decoder := yaml.NewDecoder(bytes.NewReader(templateData))
 
 	for {
@@ -50,28 +47,23 @@ func ParseTemplate(templateData []byte) (*TemplateInstructionsImpl, error) {
 				instr.If = ifCondition
 			}
 		}
-		instructions = append(instructions, instr)
+		tmpInstructions = append(tmpInstructions, instr)
 	}
 
-	return &TemplateInstructionsImpl{instructions: instructions}, nil
+	return tmpInstructions, nil
 }
 
-func (t *TemplateInstructionsImpl) AdjustTemplate(ctx context.Context) ([]byte, error) {
-	itemAny := ctx.Value(ItemKey)
+func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, instructions []Instruction) ([]byte, error) {
 	contextAny := ctx.Value(DataKey)
 
-	itemMap, _ := itemAny.(map[string]any)
-	if itemMap == nil {
-		itemMap = map[string]any{}
-	}
 	dataMap, _ := contextAny.(map[string]any)
 	if dataMap == nil {
 		dataMap = map[string]any{}
 	}
 
-	templateSet := findApplicableTemplate(t, itemMap, dataMap)
+	templateSet := t.findApplicableTemplate(instructions, item, dataMap)
 
-	combinedResult := combineTemplates(t, templateSet, itemMap, dataMap)
+	combinedResult := t.combineTemplates(instructions, templateSet, item, dataMap)
 
 	if len(combinedResult) == 0 {
 		// TODO: Log warning about no templates applied
@@ -85,16 +77,16 @@ func (t *TemplateInstructionsImpl) AdjustTemplate(ctx context.Context) ([]byte, 
 	return finalJSON, nil
 }
 
-func findApplicableTemplate(t *TemplateInstructionsImpl, item map[string]any, ctx map[string]any) map[string]struct{} {
+func (t *TemplateLib) findApplicableTemplate(instructions []Instruction, item map[string]any, ctx map[string]any) map[string]struct{} {
 	templateSet := make(map[string]struct{})
 
-	for _, instr := range t.instructions {
+	for _, instr := range instructions {
 		if strings.TrimSpace(instr.Kind) != "View" {
 			continue
 		}
 
 		if instr.If != "" {
-			match, err := evaluateCondition(instr.If, item, ctx)
+			match, err := t.evaluateCondition(instr.If, item, ctx)
 			if err != nil {
 				// TODO: Log error while evaluating condition
 				continue
@@ -121,10 +113,10 @@ func findApplicableTemplate(t *TemplateInstructionsImpl, item map[string]any, ct
 	return templateSet
 }
 
-func combineTemplates(t *TemplateInstructionsImpl, templateSet map[string]struct{}, item map[string]any, ctx map[string]any) map[string]any {
+func (t *TemplateLib) combineTemplates(instructions []Instruction, templateSet map[string]struct{}, item map[string]any, ctx map[string]any) map[string]any {
 	combined := make(map[string]any)
 
-	for _, instr := range t.instructions {
+	for _, instr := range instructions {
 		if strings.TrimSpace(instr.Kind) != "Template" {
 			continue
 		}
@@ -134,13 +126,13 @@ func combineTemplates(t *TemplateInstructionsImpl, templateSet map[string]struct
 			continue
 		}
 
-		applyTemplateSpec(instr.Spec, combined, item, ctx)
+		t.applyTemplateSpec(instr.Spec, combined, item, ctx)
 	}
 
 	return combined
 }
 
-func applyTemplateSpec(spec map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyTemplateSpec(spec map[string]any, combined map[string]any, item, ctx map[string]any) {
 	for key, value := range spec {
 		if strings.TrimSpace(key) == "if" {
 			continue
@@ -148,42 +140,42 @@ func applyTemplateSpec(spec map[string]any, combined map[string]any, item, ctx m
 
 		switch val := value.(type) {
 		case map[string]any:
-			applyMapValue(key, val, combined, item, ctx)
+			t.applyMapValue(key, val, combined, item, ctx)
 		default:
 			combined[key] = val
 		}
 	}
 }
 
-func applyMapValue(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyMapValue(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
 	typeRaw, hasType := val["type"]
 	if !hasType {
-		applyNestedObject(key, val, combined, item, ctx)
+		t.applyNestedObject(key, val, combined, item, ctx)
 		return
 	}
 
 	typeStr, _ := typeRaw.(string)
 	switch typeStr {
 	case "string":
-		if err := processStringValue(key, val, combined, item, ctx); err != nil {
+		if err := t.processStringValue(key, val, combined, item, ctx); err != nil {
 			// TODO: log error
 		}
 	case "number":
-		processNumberValue(key, val, combined, item, ctx)
+		t.processNumberValue(key, val, combined, item, ctx)
 	case "array":
-		processArrayValue(key, val, combined, item, ctx)
+		t.processArrayValue(key, val, combined, item, ctx)
 	case "bool":
 		if boolVal, ok := val["value"].(bool); ok {
 			combined[key] = boolVal
 		}
 	case "object":
-		applyNestedObject(key, val, combined, item, ctx)
+		t.applyNestedObject(key, val, combined, item, ctx)
 	default:
 		combined[key] = val
 	}
 }
 
-func applyNestedObject(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyNestedObject(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
 	valueRaw, ok := val["value"].(map[string]any)
 	if !ok {
 		combined[key] = val
@@ -194,7 +186,7 @@ func applyNestedObject(key string, val map[string]any, combined map[string]any, 
 	for subKey, subVal := range valueRaw {
 		switch typedVal := subVal.(type) {
 		case map[string]any:
-			applyMapValue(subKey, typedVal, subResult, item, ctx)
+			t.applyMapValue(subKey, typedVal, subResult, item, ctx)
 		default:
 			subResult[subKey] = typedVal
 		}
@@ -210,7 +202,7 @@ func applyNestedObject(key string, val map[string]any, combined map[string]any, 
 	}
 }
 
-func processStringValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) error {
+func (t *TemplateLib) processStringValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) error {
 	var errList []error
 
 	if pathValue, exists := val["path"]; exists {
@@ -231,7 +223,7 @@ func processStringValue(key string, val map[string]any, result map[string]any, i
 		}
 	} else if valValue, exists := val["value"]; exists {
 		if tmpl, ok := valValue.(string); ok {
-			interpolated, err := interpolateString(tmpl, item, ctx)
+			interpolated, err := t.interpolateString(tmpl, item, ctx)
 			if err != nil {
 				errList = append(errList, fmt.Errorf("error interpolating string for key %s: %w", key, err))
 				result[key] = tmpl
@@ -249,7 +241,7 @@ func processStringValue(key string, val map[string]any, result map[string]any, i
 	return nil
 }
 
-func processNumberValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
+func (t *TemplateLib) processNumberValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
 	pathValue, exists := val["path"]
 	if !exists {
 		return
@@ -272,7 +264,7 @@ func processNumberValue(key string, val map[string]any, result map[string]any, i
 	}
 }
 
-func processArrayValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
+func (t *TemplateLib) processArrayValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
 	rawArr, exists := val["value"]
 	if !exists {
 		return
@@ -290,7 +282,7 @@ func processArrayValue(key string, val map[string]any, result map[string]any, it
 		}
 		if condRaw, hasCond := subMap["if"]; hasCond {
 			if condStr, ok := condRaw.(string); ok && condStr != "" {
-				match, err := evaluateCondition(condStr, item, ctx)
+				match, err := t.evaluateCondition(condStr, item, ctx)
 				if err != nil || !match {
 					continue
 				}
@@ -303,7 +295,7 @@ func processArrayValue(key string, val map[string]any, result map[string]any, it
 			}
 			switch castV2 := v2.(type) {
 			case map[string]any:
-				applyMapValue(k2, castV2, elemResult, item, ctx)
+				t.applyMapValue(k2, castV2, elemResult, item, ctx)
 			default:
 				elemResult[k2] = castV2
 			}
@@ -313,7 +305,7 @@ func processArrayValue(key string, val map[string]any, result map[string]any, it
 	result[key] = processed
 }
 
-func interpolateString(templateStr string, item map[string]any, ctx map[string]any) (string, error) {
+func (t *TemplateLib) interpolateString(templateStr string, item map[string]any, ctx map[string]any) (string, error) {
 	tmpl, err := template.New("interpolation").Funcs(template.FuncMap{
 		"item":    func() map[string]any { return item },
 		"context": func() map[string]any { return ctx },
@@ -329,13 +321,13 @@ func interpolateString(templateStr string, item map[string]any, ctx map[string]a
 	return buf.String(), nil
 }
 
-func evaluateCondition(condition string, item map[string]any, ctx map[string]any) (bool, error) {
+func (t *TemplateLib) evaluateCondition(condition string, item map[string]any, ctx map[string]any) (bool, error) {
 	params := map[string]interface{}{
 		"item":    item,
 		"context": ctx,
 	}
 
-	if err := validateKeys(condition, params); err != nil {
+	if err := t.validateKeys(condition, params); err != nil {
 		return false, err
 	}
 
@@ -352,7 +344,7 @@ func evaluateCondition(condition string, item map[string]any, ctx map[string]any
 	return result, nil
 }
 
-func validateKeys(condition string, params map[string]interface{}) error {
+func (t *TemplateLib) validateKeys(condition string, params map[string]interface{}) error {
 	exprLanguage := gval.Full()
 	_, err := exprLanguage.Evaluate(condition, params)
 	if err != nil {
