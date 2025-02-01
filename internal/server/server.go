@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"item_compositiom_service/pkg/logger"
 	"net"
 	"os"
 	"os/user"
@@ -33,8 +34,10 @@ type Server struct {
 func NewServer(
 	lc fx.Lifecycle,
 	config *Config,
-	// registry Metrics
+
 	implItemCompositionService *services.Service,
+
+	lgrInterceptor *logger.Interceptor,
 ) (*Server, error) {
 	if config == nil {
 		return nil, fmt.Errorf("gRPC server config is nil")
@@ -44,13 +47,25 @@ func NewServer(
 		return nil, fmt.Errorf("gRPC server listen address is empty")
 	}
 
+	var logOpts []logger.LogOption
+
 	if config.Logging != nil {
-		// TODO set logger here
+		logOpts = append(logOpts,
+			logger.WithDisable(config.Logging.Disable),
+			logger.WithDisableEnrichTraces(config.Logging.DisableEnrichTraces),
+			logger.WithDisableLogRequest(config.Logging.DisableLogRequestMessage),
+			logger.WithDisableLogResponse(config.Logging.DisableLogResponseMessage),
+		)
+	}
+
+	if config.Logging != nil && config.Logging.MaxMessageSize != 0 {
+		logOpts = append(logOpts, logger.WithMaxMessageSize(config.Logging.MaxMessageSize))
 	}
 
 	server := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-		// TODO set metrics, trace, recover, logging, deadline, health interceptors
+			lgrInterceptor.GetServerInterceptor(logOpts...),
+			// TODO set metrics, trace, recover, deadline, health interceptors
 		),
 	)
 
@@ -87,7 +102,7 @@ func NewServer(
 
 func (s *Server) GRPCServerDescriptor() {}
 
-func (s *Server) Start(ctx context.Context) error {
+func (s *Server) Start(_ context.Context) error {
 	lis, err := s.listen()
 	if err != nil {
 		return fmt.Errorf("gRPC server listen: %w", err)
