@@ -12,6 +12,6 @@ grpc_server:
 logger:
     dev_mode: true
     encode_time: RFC3339TimeEncoder
-    file_path: log/server.log
+    file_path: /var/log/item-composition-service/server.log
     log_level: debug
     transport: stdout+file
