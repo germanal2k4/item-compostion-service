@@ -16,4 +16,4 @@ update:
 	./cmd/app/main gen -c config/config.yaml
 
 run:
-	air -c cmd/.air.toml
+	./cmd/app/main -c config/config.yaml

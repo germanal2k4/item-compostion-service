@@ -1,0 +1,11 @@
+/var/log/item-composition-service/*.log {
+    hourly
+    missingok
+    maxsize 5G
+    nocompress
+    rotate 1
+    notifempty
+    postrotate
+        supervisorctl signal USR1 item-composition-service:* ||:
+    endscript
+}

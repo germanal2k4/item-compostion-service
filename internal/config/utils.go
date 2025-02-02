@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"item_compositiom_service/internal/server"
+	"item_compositiom_service/pkg/logger"
 	"os"
 	"time"
 )
@@ -62,10 +63,17 @@ func getDefaultConfig() *Config {
 			ListenAddress:  ":8080",
 			UnixSocketUser: "",
 			Logging: &server.Logging{
-				LogLevel: "debug",
+				MaxMessageSize: 1024,
 			},
 			StartDeadline: 5 * time.Second,
 			StopDeadline:  5 * time.Second,
+		},
+		LogConfig: &logger.Config{
+			LogLevel:   "debug",
+			Transport:  "stdout+file",
+			EncodeTime: "RFC3339TimeEncoder",
+			DevMode:    true,
+			FilePath:   "log/server.log",
 		},
 	}
 }

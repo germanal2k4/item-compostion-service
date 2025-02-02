@@ -5,7 +5,7 @@ import (
 	"github.com/spf13/cobra"
 	"item_compositiom_service/internal/config"
 	"item_compositiom_service/internal/setup"
-	"log"
+	"item_compositiom_service/pkg/logger"
 )
 
 var rootParams struct {
@@ -52,6 +52,6 @@ var defaultConfigGenCmd = &cobra.Command{
 func main() {
 	err := rootCmd.Execute()
 	if err != nil {
-		log.Fatalf("execute command: %s", err.Error())
+		logger.FallbackLogger().Fatalf("error executing root command: %s", err.Error())
 	}
 }

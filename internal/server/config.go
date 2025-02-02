@@ -14,11 +14,11 @@ type Config struct {
 }
 
 type Logging struct {
-	Disable                   bool   `yaml:"disable"`
-	DisableEnrichTraces       bool   `yaml:"disable_enrich_traces"`
-	DisableLogRequestMessage  bool   `yaml:"disable_log_request_message"`
-	DisableLogResponseMessage bool   `yaml:"disable_log_response_message"`
-	LogLevel                  string `yaml:"log_level"`
+	Disable                   bool `yaml:"disable"`
+	DisableEnrichTraces       bool `yaml:"disable_enrich_traces"`
+	DisableLogRequestMessage  bool `yaml:"disable_log_request_message"`
+	DisableLogResponseMessage bool `yaml:"disable_log_response_message"`
+	MaxMessageSize            int  `yaml:"max_message_size"`
 }
 
 func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -44,10 +44,6 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if tmp.StopDeadline == nil {
 		return fmt.Errorf("missing requred `grpc_server.stop_deadline`")
-	}
-
-	if tmp.Logging != nil || tmp.Logging.LogLevel == "" {
-		return fmt.Errorf("missing required `grpc_server.log_level`")
 	}
 
 	c.ListenAddress = *tmp.ListenAddress

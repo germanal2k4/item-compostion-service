@@ -1,18 +1,20 @@
-FROM golang:1.23.5-alpine AS base
+FROM ubuntu AS base
 
 WORKDIR /app
 
 EXPOSE 3030
 
-RUN go install github.com/air-verse/air@latest
+RUN apt-get update && apt-get install -y supervisor && apt-get install -y logrotate
 
-COPY go.mod go.sum ./
-RUN go mod download
+COPY --chmod=0644 deployment/logrotate          /etc/logrotate.d/item-composition-service
+COPY deployment/supervisord.conf                /etc/supervisor/supervisord.conf
+COPY --chmod=0755 deployment/pre_start.sh       /opt/bin/pre_start
 
-COPY cmd/.air.toml                          ./cmd/.air.toml
-COPY --chmod=0755 cmd/app/main              ./cmd/app/main
-COPY api                                    ./api
-COPY proto                                  ./proto
-COPY config                                 ./config
+COPY --chmod=0755 cmd/app/main                  /opt/bin/item-composition-service
+COPY api                                        /app/api
+COPY proto                                      /app/proto
+COPY config/config.yaml                         /etc/item-composition-service/config.yaml
 
-CMD ["air", "-c", "cmd/.air.toml"]
+RUN /opt/bin/pre_start
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
