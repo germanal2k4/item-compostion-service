@@ -1,5 +1,5 @@
 grpc_server:
-    listen_address: :8080
+    listen_address: :3030
     logging:
         disable: false
         disable_enrich_traces: false
@@ -12,6 +12,16 @@ grpc_server:
 logger:
     dev_mode: true
     encode_time: RFC3339TimeEncoder
-    file_path: /var/log/item-composition-service/server.log
+    file_path: /var/log/item-composition-service/server.log # ./log/server.log
     log_level: debug
     transport: stdout+file
+trace:
+    batch_span_processor:
+        batch_timeout: 5s
+        export_timeout: 30s
+        max_export_batch_size: 512
+        max_queue_size: 2048
+        with_blocking: false
+    disable_baggage_propagation: false
+    enabled: true
+    url: jaeger:4317

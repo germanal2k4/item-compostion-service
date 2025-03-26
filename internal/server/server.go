@@ -10,6 +10,7 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/tracer"
 	"net"
 	"os"
 	"os/user"
@@ -38,6 +39,7 @@ func NewServer(
 	implItemCompositionService *services.Service,
 
 	lgrInterceptor *logger.Interceptor,
+	traceInterceptor *tracer.Interceptor,
 ) (*Server, error) {
 	if config == nil {
 		return nil, fmt.Errorf("gRPC server config is nil")
@@ -64,8 +66,9 @@ func NewServer(
 
 	server := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
+			traceInterceptor.GetServerInterceptor(),
 			lgrInterceptor.GetServerInterceptor(logOpts...),
-			// TODO set metrics, trace, recover, deadline, health interceptors
+			// TODO set metrics, recover, deadline, health interceptors
 		),
 	)
 

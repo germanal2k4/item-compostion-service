@@ -5,8 +5,15 @@ services:
       context: .
       dockerfile: Dockerfile
     image: item-composition-service:latest
-    command: /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+    depends_on:
+      - jaeger
     ports:
       - "3030:3030"
     volumes:
-      - ./:/app
+      - ./config/config.yaml:/etc/item-composition-service/config.yaml
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    ports:
+      - "16686:16686" # jaeger Web UI
+      - "4317:4317" # otel gRPC collector

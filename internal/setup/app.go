@@ -8,6 +8,7 @@ import (
 	"item_compositiom_service/internal/server"
 	"item_compositiom_service/internal/services"
 	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/tracer"
 )
 
 func Setup(configPath string) (*fx.App, error) {
@@ -24,6 +25,8 @@ func Setup(configPath string) (*fx.App, error) {
 			server.NewServer,
 			logger.NewLogger,
 			logger.NewInterceptor,
+			tracer.NewTracer,
+			tracer.NewInterceptor,
 			func() string {
 				return configPath
 			},
@@ -33,11 +36,15 @@ func Setup(configPath string) (*fx.App, error) {
 			func() *logger.Config {
 				return cfg.LogConfig
 			},
+			func() *tracer.Config {
+				return cfg.TraceConfig
+			},
 		),
 		fx.Invoke(func(*server.Server) {}),
 		fx.Invoke(func(l *zap.SugaredLogger) {
 			l.Infow("setup complete successfully")
 		}),
+		fx.Invoke(func(*tracer.Tracer) {}),
 		fx.WithLogger(func(l *zap.SugaredLogger) fxevent.Logger {
 			return &fxevent.ZapLogger{Logger: l.Desugar()}
 		}),

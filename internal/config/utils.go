@@ -5,6 +5,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"item_compositiom_service/internal/server"
 	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/tracer"
 	"os"
 	"time"
 )
@@ -74,6 +75,16 @@ func getDefaultConfig() *Config {
 			EncodeTime: "RFC3339TimeEncoder",
 			DevMode:    true,
 			FilePath:   "log/server.log",
+		},
+		TraceConfig: &tracer.Config{
+			Enabled: true,
+			Url:     "localhost:4317",
+			BatchSpanProcessor: tracer.BatchSpanProcessor{
+				MaxQueueSize:       2048,
+				MaxExportBatchSize: 512,
+				BatchTimeout:       5 * time.Second,
+				ExportTimeout:      30 * time.Second,
+			},
 		},
 	}
 }
