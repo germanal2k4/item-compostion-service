@@ -17,7 +17,7 @@ func ToContext(ctx context.Context, logger *zap.SugaredLogger) context.Context {
 
 func ContextWithKV(ctx context.Context, kvs ...interface{}) context.Context {
 	l := FromContext(ctx).Desugar()
-	result := make([]zap.Field, len(kvs)/2)
+	result := make([]zap.Field, 0, len(kvs)/2)
 	for i := 0; i < len(kvs); i += 2 {
 		if i == len(kvs)-1 {
 			break

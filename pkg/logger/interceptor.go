@@ -2,10 +2,17 @@ package logger
 
 import (
 	"context"
+	"fmt"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"item_compositiom_service/pkg/tracer"
+	"strings"
+	"sync"
 )
 
 type options struct {
@@ -69,17 +76,37 @@ func (i *Interceptor) GetServerInterceptor(opts ...LogOption) grpc.UnaryServerIn
 			return handler(ctx, req)
 		}
 
-		traces := zap.Skip()
+		md, mdStr := i.metadataLogField(ctx)
+		body, bodyStr := i.messageBodyField(req)
+
+		traceField := zap.Skip()
+		spanField := zap.Skip()
+		span := trace.SpanFromContext(ctx)
+		if span.SpanContext().IsValid() {
+			traceField = zap.String("trace_id", span.SpanContext().TraceID().String())
+			spanField = zap.String("span_id", span.SpanContext().SpanID().String())
+		}
 
 		if !i.opts.disableEnrichTraces {
-			// enrich traces
+			trace.SpanFromContext(ctx).SetAttributes(
+				attribute.String(
+					"grpc_message_body",
+					tracer.TraceSafeString(bodyStr),
+				),
+				attribute.String(
+					"metadata",
+					tracer.TraceSafeString(mdStr),
+				),
+			)
 		}
 
 		if !i.opts.disableLogRequest {
 			i.l.Infow("New incoming request",
 				"component", "server",
-				traces,
-				i.messageBodyField(req),
+				traceField,
+				spanField,
+				body,
+				md,
 			)
 		}
 
@@ -88,17 +115,31 @@ func (i *Interceptor) GetServerInterceptor(opts ...LogOption) grpc.UnaryServerIn
 		if err != nil && !i.opts.disableLogResponse {
 			i.l.Errorw("Got error response",
 				"component", "server",
-				traces,
-				i.messageBodyField(req),
+				traceField,
+				spanField,
+				body,
+				md,
 				zap.Error(err),
 			)
 		}
 
+		respBody, respBodyStr := i.messageBodyField(resp)
+
 		if !i.opts.disableLogResponse {
 			i.l.Infow("Request finished",
 				"component", "server",
-				traces,
-				i.messageBodyField(resp),
+				traceField,
+				spanField,
+				respBody,
+			)
+		}
+
+		if !i.opts.disableEnrichTraces && resp != nil {
+			trace.SpanFromContext(ctx).SetAttributes(
+				attribute.String(
+					"grpc_message_response",
+					tracer.TraceSafeString(respBodyStr),
+				),
 			)
 		}
 
@@ -106,25 +147,59 @@ func (i *Interceptor) GetServerInterceptor(opts ...LogOption) grpc.UnaryServerIn
 	}
 }
 
-func (i *Interceptor) messageBodyField(payload any) zap.Field {
+func (i *Interceptor) messageBodyField(payload any) (zap.Field, string) {
 	messageBodyField := zap.Skip()
 
 	p, ok := payload.(proto.Message)
 	if !ok {
 		i.l.Warnf("Payload is not a proto message")
-		return messageBodyField
+		return messageBodyField, ""
 	}
 
 	body, err := protojson.Marshal(p)
 	if err != nil {
 		i.l.Warnf("Error marshalling proto message")
-		return messageBodyField
+		return messageBodyField, ""
 	}
 
 	if len(body) > i.opts.maxMessageSize {
-		body := body[:i.opts.maxMessageSize]
+		body = body[:i.opts.maxMessageSize]
 		body = append(body, "..."...)
 	}
 
-	return zap.String("body", string(body))
+	return zap.String("body", string(body)), string(body)
+}
+
+var mdPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
+
+func (i *Interceptor) metadataLogField(ctx context.Context) (zap.Field, string) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	if md.Len() == 0 {
+		return zap.Skip(), ""
+	}
+
+	fields := make([]zap.Field, 0, md.Len())
+	builder := mdPool.Get().(*strings.Builder)
+	for k, v := range md {
+		if len(v) == 0 {
+			fields = append(fields, zap.String(k, ""))
+			builder.WriteString(fmt.Sprintf("%s: ''\n", k))
+			continue
+		}
+
+		if len(v) == 1 {
+			fields = append(fields, zap.String(k, v[0]))
+			builder.WriteString(fmt.Sprintf("%s: '%s'\n", k, v[0]))
+			continue
+		}
+
+		fields = append(fields, zap.Strings(k, v))
+		builder.WriteString(fmt.Sprintf("%s: '%s'\n", k, strings.Join(v, ",")))
+	}
+
+	return zap.Dict("metadata", fields...), builder.String()
 }

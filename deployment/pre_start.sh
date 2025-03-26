@@ -1,3 +1,5 @@
+#!/bin/sh
+
 mkdir -p /var/log
 mkdir -p /var/log/supervisor
 mkdir -p /var/log/item-composition-service

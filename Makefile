@@ -17,3 +17,12 @@ update:
 
 run:
 	./cmd/app/main -c config/config.yaml
+
+docker_build:
+	docker build -t item-composition-service:latest --load .
+
+deploy:
+	make gen proto
+	make build
+	make docker build
+	docker compose up
