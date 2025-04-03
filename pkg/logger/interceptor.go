@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"item_compositiom_service/pkg/recovery"
 	"item_compositiom_service/pkg/tracer"
 	"strings"
 	"sync"
@@ -56,13 +58,13 @@ func WithMaxMessageSize(size int) LogOption {
 }
 
 type Interceptor struct {
-	l    *zap.SugaredLogger
+	l    *zap.Logger
 	opts options
 }
 
 func NewInterceptor(l *zap.SugaredLogger) *Interceptor {
 	return &Interceptor{
-		l: l,
+		l: l.Desugar(),
 	}
 }
 
@@ -87,6 +89,8 @@ func (i *Interceptor) GetServerInterceptor(opts ...LogOption) grpc.UnaryServerIn
 			spanField = zap.String("span_id", span.SpanContext().SpanID().String())
 		}
 
+		lgr := i.l.With(traceField, spanField)
+
 		if !i.opts.disableEnrichTraces {
 			trace.SpanFromContext(ctx).SetAttributes(
 				attribute.String(
@@ -101,35 +105,39 @@ func (i *Interceptor) GetServerInterceptor(opts ...LogOption) grpc.UnaryServerIn
 		}
 
 		if !i.opts.disableLogRequest {
-			i.l.Infow("New incoming request",
-				"component", "server",
-				traceField,
-				spanField,
+			lgr.Info("New incoming request",
+				zap.String("component", "server"),
 				body,
 				md,
 			)
 		}
 
-		ctx = ToContext(ctx, i.l)
+		ctx = ToContext(ctx, lgr.Sugar())
 		resp, err = handler(ctx, req)
-		if err != nil && !i.opts.disableLogResponse {
-			i.l.Errorw("Got error response",
-				"component", "server",
-				traceField,
-				spanField,
-				body,
-				md,
-				zap.Error(err),
-			)
-		}
 
 		respBody, respBodyStr := i.messageBodyField(resp)
 
+		if err != nil {
+			panicErr := &recovery.PanicError{}
+
+			if errors.As(err, &panicErr) {
+				lgr.Error(fmt.Sprintf("Panic occurred: %s", string(panicErr.Stack)),
+					zap.String("component", "server"),
+					respBody,
+					zap.Any("panic_message", panicErr.Panic),
+				)
+			} else {
+				lgr.Error("Got error response",
+					zap.String("component", "server"),
+					respBody,
+					zap.String("error_message", err.Error()),
+				)
+			}
+		}
+
 		if !i.opts.disableLogResponse {
-			i.l.Infow("Request finished",
-				"component", "server",
-				traceField,
-				spanField,
+			lgr.Info("Request finished",
+				zap.String("component", "server"),
 				respBody,
 			)
 		}
@@ -152,13 +160,13 @@ func (i *Interceptor) messageBodyField(payload any) (zap.Field, string) {
 
 	p, ok := payload.(proto.Message)
 	if !ok {
-		i.l.Warnf("Payload is not a proto message")
+		i.l.Warn("Payload is not a proto message")
 		return messageBodyField, ""
 	}
 
 	body, err := protojson.Marshal(p)
 	if err != nil {
-		i.l.Warnf("Error marshalling proto message")
+		i.l.Warn("Error marshalling proto message")
 		return messageBodyField, ""
 	}
 
