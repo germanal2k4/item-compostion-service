@@ -12,9 +12,12 @@ grpc_server:
 logger:
     dev_mode: true
     encode_time: RFC3339TimeEncoder
-    file_path: /var/log/item-composition-service/server.log # ./log/server.log
+    file_path: /var/log/item-composition-service/server.log
     log_level: debug
     transport: stdout+file
+metrics:
+    enable: true
+    port: 8080
 trace:
     batch_span_processor:
         batch_timeout: 5s

@@ -1,0 +1,29 @@
+grpc_server:
+  listen_address: :3030
+  logging:
+    disable: false
+    disable_enrich_traces: false
+    disable_log_request_message: false
+    disable_log_response_message: false
+    max_message_size: 1024
+  start_deadline: 5s
+  stop_deadline: 5s
+  unix_socket_user: ""
+logger:
+  dev_mode: true
+  encode_time: RFC3339TimeEncoder
+  log_level: debug
+  transport: stdout
+metrics:
+  enable: true
+  port: 8080
+trace:
+  batch_span_processor:
+    batch_timeout: 5s
+    export_timeout: 30s
+    max_export_batch_size: 512
+    max_queue_size: 2048
+    with_blocking: false
+  disable_baggage_propagation: false
+  enabled: true
+  url: jaeger:4317

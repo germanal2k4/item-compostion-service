@@ -5,6 +5,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"item_compositiom_service/internal/server"
 	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/metrics"
 	"item_compositiom_service/pkg/tracer"
 	"os"
 	"time"
@@ -61,7 +62,7 @@ func GenerateDefaultConfig(configPath string) error {
 func getDefaultConfig() *Config {
 	return &Config{
 		GrpcConfig: &server.Config{
-			ListenAddress:  ":8080",
+			ListenAddress:  ":3030",
 			UnixSocketUser: "",
 			Logging: &server.Logging{
 				MaxMessageSize: 1024,
@@ -74,7 +75,7 @@ func getDefaultConfig() *Config {
 			Transport:  "stdout+file",
 			EncodeTime: "RFC3339TimeEncoder",
 			DevMode:    true,
-			FilePath:   "log/server.log",
+			FilePath:   "/var/log/item-composition-service/server.log",
 		},
 		TraceConfig: &tracer.Config{
 			Enabled: true,
@@ -85,6 +86,10 @@ func getDefaultConfig() *Config {
 				BatchTimeout:       5 * time.Second,
 				ExportTimeout:      30 * time.Second,
 			},
+		},
+		MetricsConfig: &metrics.Config{
+			Enable: true,
+			Port:   8080,
 		},
 	}
 }
