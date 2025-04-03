@@ -16,7 +16,7 @@ update:
 	./cmd/app/main gen -c config/config.yaml
 
 run:
-	./cmd/app/main -c config/config.yaml
+	./cmd/app/main -c config/config_local.yaml
 
 docker_build:
 	docker build -t item-composition-service:latest --load .
