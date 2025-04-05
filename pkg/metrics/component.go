@@ -65,7 +65,7 @@ func (m *Metrics) Start() {
 	go func() {
 		defer m.wg.Done()
 		if err := m.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			m.metricsLgr.Errorf("listen http server: %s", err.Error())
+			m.metricsLgr.Errorf("Listen http server: %s", err.Error())
 		}
 	}()
 }

@@ -10,7 +10,7 @@
       "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
       "targets": [
         {
-          "expr": "rate(requests_total[1m])",
+          "expr": "rate(grpc_server_requests_total[1m])",
           "legendFormat": "{{method}} ({{code}})",
           "refId": "A",
           "datasource": {"type": "prometheus", "uid": "Prometheus"}
@@ -34,7 +34,7 @@
       "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(request_duration_seconds_bucket[1m])) by (le, method))",
+          "expr": "histogram_quantile(0.95, sum(rate(grpc_server_request_duration_bucket[1m])) by (le, method))",
           "legendFormat": "{{method}}",
           "refId": "A",
           "datasource": {"type": "prometheus", "uid": "Prometheus"}
@@ -59,7 +59,7 @@
       "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
       "targets": [
         {
-          "expr": "rate(errors_total[1m])",
+          "expr": "rate(grpc_server_errors_total[1m])",
           "legendFormat": "{{method}} ({{code}})",
           "refId": "A",
           "datasource": {"type": "prometheus", "uid": "Prometheus"}
