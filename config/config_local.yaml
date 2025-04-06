@@ -11,9 +11,15 @@ grpc_server:
   unix_socket_user: ""
 logger:
   dev_mode: true
+  elastic_config:
+    flush_interval: 5s
+    index: logs
+    url: http://localhost:9200
+    write_buffer_size: 1024
   encode_time: RFC3339TimeEncoder
+  file_path: ./log/server.log
   log_level: debug
-  transport: stdout
+  transport: file+elastic
 metrics:
   enable: true
   port: 8080
@@ -26,4 +32,4 @@ trace:
     with_blocking: false
   disable_baggage_propagation: false
   enabled: true
-  url: jaeger:4317
+  url: localhost:4317

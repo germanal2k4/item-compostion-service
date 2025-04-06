@@ -23,6 +23,9 @@ services:
     image: prom/prometheus:latest
     container_name: prometheus
     restart: unless-stopped
+    depends_on:
+      - jaeger
+      - service
     volumes:
       - ./deployment/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
@@ -46,3 +49,13 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+      - jaeger
+      - elasticsearch
+
+  elasticsearch:
+    image: elasticsearch:7.17.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"

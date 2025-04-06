@@ -72,14 +72,20 @@ func getDefaultConfig() *Config {
 		},
 		LogConfig: &logger.Config{
 			LogLevel:   "debug",
-			Transport:  "stdout+file",
+			Transport:  "file+elastic",
 			EncodeTime: "RFC3339TimeEncoder",
 			DevMode:    true,
 			FilePath:   "/var/log/item-composition-service/server.log",
+			ElasticConfig: &logger.ElasticConfig{
+				Url:             "http://elasticsearch:9200",
+				Index:           "logs",
+				WriteBufferSize: 1024,
+				FlushInterval:   5 * time.Second,
+			},
 		},
 		TraceConfig: &tracer.Config{
 			Enabled: true,
-			Url:     "localhost:4317",
+			Url:     "jaeger:4317",
 			BatchSpanProcessor: tracer.BatchSpanProcessor{
 				MaxQueueSize:       2048,
 				MaxExportBatchSize: 512,

@@ -2,7 +2,6 @@ package setup
 
 import (
 	"go.uber.org/fx"
-	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
 	"item_compositiom_service/internal/config"
 	"item_compositiom_service/internal/server"
@@ -47,11 +46,10 @@ func Setup(configPath string) (*fx.App, error) {
 			},
 		),
 		fx.Invoke(func(*server.Server) {}),
-		fx.Invoke(func(l *zap.SugaredLogger) {}),
+		fx.Invoke(func(l *zap.SugaredLogger) {
+			l.Infow("Setup complete", "config_path", configPath)
+		}),
 		fx.Invoke(func(*tracer.Tracer) {}),
 		fx.Invoke(func(metrics.MetricsRegistry) {}),
-		fx.WithLogger(func(l *zap.SugaredLogger) fxevent.Logger {
-			return &fxevent.ZapLogger{Logger: l.Desugar()}
-		}),
 	), nil
 }

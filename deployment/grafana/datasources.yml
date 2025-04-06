@@ -6,3 +6,19 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    basicAuth: false
+    jsonData:
+      index: logs
+      timeField: "@timestamp"
+      version: 7.17.0
+      flavor: elasticsearch

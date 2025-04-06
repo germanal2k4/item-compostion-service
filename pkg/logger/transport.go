@@ -5,15 +5,16 @@ import (
 	"github.com/mattn/go-isatty"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"item_compositiom_service/pkg/logger/elastic"
 	"net/url"
 	"os"
 	"syscall"
 )
 
 const (
-	stdoutTransport        = "stdout"
-	fileTransport          = "file"
-	stdoutAndFileTransport = "stdout+file"
+	stdoutTransport         = "stdout"
+	fileTransport           = "file"
+	fileAndElasticTransport = "file+elastic"
 )
 
 type transport struct {
@@ -58,14 +59,38 @@ func getFileTransport(info *loggerInfo) (*transport, error) {
 		return nil, fmt.Errorf("failed to open logrotate sink: %w", err)
 	}
 
-	fileCore := zapcore.NewCore(zapcore.NewJSONEncoder(info.encCfg), sink, info.lvl)
-
-	res.core = zapcore.NewTee(fileCore)
+	res.core = zapcore.NewCore(zapcore.NewJSONEncoder(info.encCfg), sink, info.lvl)
 	res.stop = func() {
 		if err := sink.Close(); err != nil {
 			fallbackLogger.Error("failed to close sink", zap.Error(err))
 		}
 	}
 
+	return res, nil
+}
+
+func getElasticTransport(info *loggerInfo) (*transport, error) {
+	res := &transport{}
+
+	if info.cfg.ElasticConfig == nil {
+		return nil, fmt.Errorf("no elastic config specified")
+	}
+
+	sink, err := elastic.NewElasticSink(fallbackLogger,
+		elastic.WithFlushInterval(info.cfg.ElasticConfig.FlushInterval),
+		elastic.WithIndex(info.cfg.ElasticConfig.Index),
+		elastic.WithUrl(info.cfg.ElasticConfig.Url),
+		elastic.WithWriteBufferSize(info.cfg.ElasticConfig.WriteBufferSize),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open elastic sink: %w", err)
+	}
+
+	res.core = zapcore.NewCore(zapcore.NewJSONEncoder(info.encCfg), sink, info.lvl)
+	res.stop = func() {
+		if err := sink.Close(); err != nil {
+			fallbackLogger.Error("failed to close sink", zap.Error(err))
+		}
+	}
 	return res, nil
 }
