@@ -36,13 +36,13 @@ func NewLogger(lc fx.Lifecycle, cfg *Config) (*zap.SugaredLogger, error) {
 		return nil, err
 	}
 
-	if cfg.Transport == stdoutAndFileTransport || cfg.Transport == stdoutTransport {
+	if cfg.Transport == stdoutTransport {
 		stdoutTransport := getStdoutTransport(info)
 		cores = append(cores, stdoutTransport.core)
 		stops = append(stops, stdoutTransport.stop)
 	}
 
-	if cfg.Transport == fileTransport || cfg.Transport == stdoutAndFileTransport {
+	if cfg.Transport == fileTransport || cfg.Transport == fileAndElasticTransport {
 		fileTransport, err := getFileTransport(info)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get file transport for logger: %w", err)
@@ -50,6 +50,20 @@ func NewLogger(lc fx.Lifecycle, cfg *Config) (*zap.SugaredLogger, error) {
 
 		cores = append(cores, fileTransport.core)
 		stops = append(stops, fileTransport.stop)
+	}
+
+	if cfg.Transport == fileAndElasticTransport {
+		elasticTransport, err := getElasticTransport(info)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get elastic transport for logger: %w", err)
+		}
+
+		cores = append(cores, elasticTransport.core)
+		stops = append(stops, elasticTransport.stop)
+	}
+
+	if len(cores) == 0 {
+		return nil, fmt.Errorf("no logger could be created for %s", cfg.Transport)
 	}
 
 	lgr := zap.New(zapcore.NewTee(cores...), info.opts...).Sugar()

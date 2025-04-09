@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: 'Item-Composition-Service Dashboard'
+    folder: 'Item-Composition-Service'
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
