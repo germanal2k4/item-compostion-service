@@ -11,6 +11,13 @@ datasources:
     type: jaeger
     access: proxy
     url: http://jaeger:16686
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: 'Elasticsearch'
+        customQuery: true
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        query: 'trace_id="$${__trace.traceId}"'
 
   - name: Elasticsearch
     type: elasticsearch
@@ -22,3 +29,4 @@ datasources:
       timeField: "@timestamp"
       version: 7.17.0
       flavor: elasticsearch
+      logMessageField: msg
