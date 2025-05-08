@@ -1,0 +1,29 @@
+version: v1
+kind: ProviderGRPC
+metadata:
+  name: reaction
+  labels:
+    foo: bar
+spec:
+  transport:
+    address: reaction.tbank.ru:443
+    timeout: 1s
+    logging:
+      enabled: true
+  payload:
+    headers:
+      x-api-key: ${PLANET_REACTION_API_KEY}
+      x-app-name: my-application
+  methods:
+    - package: reaction.internal
+      service: ReactionInternalService
+      method: GetReactionCountersByDomainId
+      type: DomainBatch
+      timeout: 1s
+      filter:
+        if: 'item.createdAt > time.Now - 7 * time.Day'
+      request:
+        domain: item.domain
+        domain_ids: item.id
+      response:
+        itemId: items.domain_id 
