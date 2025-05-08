@@ -6,14 +6,24 @@ import (
 	"github.com/PaesslerAG/gval"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"net"
 	"time"
 )
+
+type RetryConfig struct {
+	MaxAttempts       int           `json:"maxAttempts"`
+	InitialBackoff    time.Duration `json:"initialBackoff"`
+	MaxBackoff        time.Duration `json:"maxBackoff"`
+	BackoffMultiplier float64       `json:"backoffMultiplier"`
+	RetryableCodes    []string      `json:"retryableCodes"`
+}
 
 type GRPCProvider struct {
 	spec    *ProviderSpec
 	conn    *grpc.ClientConn
 	methods map[string]*MethodConfig
+	retry   *RetryConfig
 }
 
 func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
@@ -37,10 +47,19 @@ func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
 		methods[method.Method] = method
 	}
 
+	retryConfig := &RetryConfig{
+		MaxAttempts:       3,
+		InitialBackoff:    time.Second,
+		MaxBackoff:        time.Second * 10,
+		BackoffMultiplier: 2.0,
+		RetryableCodes:    []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"},
+	}
+
 	return &GRPCProvider{
 		spec:    spec,
 		conn:    conn,
 		methods: methods,
+		retry:   retryConfig,
 	}, nil
 }
 
@@ -72,11 +91,54 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 		}
 	}
 
-	_, cancel := context.WithTimeout(ctx, method.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, method.Timeout)
 	defer cancel()
 
-	// TODO: Implement actual gRPC call based on method configuration
+	var result interface{}
+	var lastErr error
+	backoff := p.retry.InitialBackoff
 
+	for attempt := 1; attempt <= p.retry.MaxAttempts; attempt++ {
+		result, lastErr = p.executeGRPCCall(ctx, method, data)
+		if lastErr == nil {
+			return result, nil
+		}
+
+		if st, ok := status.FromError(lastErr); ok {
+			isRetryable := false
+			for _, code := range p.retry.RetryableCodes {
+				if st.Code().String() == code {
+					isRetryable = true
+					break
+				}
+			}
+			if !isRetryable {
+				return nil, lastErr
+			}
+		}
+
+		if attempt == p.retry.MaxAttempts {
+			return nil, fmt.Errorf("failed after %d attempts, last error: %w", attempt, lastErr)
+		}
+
+		backoff = time.Duration(float64(backoff) * p.retry.BackoffMultiplier)
+		if backoff > p.retry.MaxBackoff {
+			backoff = p.retry.MaxBackoff
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+			continue
+		}
+	}
+
+	return nil, lastErr
+}
+
+func (p *GRPCProvider) executeGRPCCall(ctx context.Context, method *MethodConfig, data map[string]interface{}) (interface{}, error) {
+	// TODO: Implement actual gRPC call based on method configuration
 	return nil, fmt.Errorf("not implemented")
 }
 
