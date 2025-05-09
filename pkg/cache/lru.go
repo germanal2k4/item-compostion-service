@@ -116,6 +116,13 @@ func (l *LruSetGetter[K, V]) CleanUp() int {
 	return cleaned
 }
 
+func (l *LruSetGetter[K, V]) Len() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	return len(l.data)
+}
+
 func (l *LruSetGetter[K, V]) removeElement(elem *list.Element) {
 	entry := elem.Value.(*lruEntry[K, V])
 	delete(l.data, entry.key)

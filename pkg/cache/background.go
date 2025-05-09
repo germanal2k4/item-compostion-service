@@ -80,3 +80,10 @@ func (s *BackgroundSetGetter[K, V]) CleanUp() int {
 
 	return cleaned
 }
+
+func (s *BackgroundSetGetter[K, V]) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return len(s.data)
+}
