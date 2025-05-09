@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/PaesslerAG/gval"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 	"io"
+	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/provider"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -20,7 +24,22 @@ const (
 )
 
 type TemplateLib struct {
+	mu        sync.RWMutex
+	providers map[string]provider.Provider
 }
+
+func NewTemplateLib() *TemplateLib {
+	return &TemplateLib{
+		providers: make(map[string]provider.Provider),
+	}
+}
+
+func (t *TemplateLib) RegisterProvider(p provider.Provider) {
+	t.mu.Lock()
+	t.providers[p.GetName()] = p
+	t.mu.Unlock()
+}
+
 type Instruction struct {
 	Kind     string         `yaml:"kind"`
 	Version  string         `yaml:"version"`
@@ -42,6 +61,23 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			}
 			return nil, fmt.Errorf("error parsing YAML: %w", err)
 		}
+
+		if instr.Kind == "ProviderGRPC" {
+			parser := provider.NewGRPCProviderParser()
+			spec, err := parser.Parse(templateData)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing provider spec: %w", err)
+			}
+
+			grpcProvider, err := provider.NewGRPCProvider(spec)
+			if err != nil {
+				return nil, fmt.Errorf("error creating provider: %w", err)
+			}
+
+			t.RegisterProvider(grpcProvider)
+			continue
+		}
+
 		if ifValue, exists := instr.Spec["if"]; exists {
 			if ifCondition, ok := ifValue.(string); ok {
 				instr.If = ifCondition
@@ -54,19 +90,13 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 }
 
 func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, instructions []Instruction) ([]byte, error) {
-	contextAny := ctx.Value(DataKey)
 
-	dataMap, _ := contextAny.(map[string]any)
-	if dataMap == nil {
-		dataMap = map[string]any{}
-	}
+	templateSet := t.findApplicableTemplate(ctx, instructions, item)
 
-	templateSet := t.findApplicableTemplate(instructions, item, dataMap)
-
-	combinedResult := t.combineTemplates(instructions, templateSet, item, dataMap)
+	combinedResult := t.combineTemplates(ctx, instructions, templateSet, item)
 
 	if len(combinedResult) == 0 {
-		// TODO: Log warning about no templates applied
+		logger.FromContext(ctx).With("component", "template_lib").Warn("No combined result")
 	}
 
 	finalJSON, err := json.MarshalIndent(combinedResult, "", "  ")
@@ -77,7 +107,7 @@ func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, i
 	return finalJSON, nil
 }
 
-func (t *TemplateLib) findApplicableTemplate(instructions []Instruction, item map[string]any, ctx map[string]any) map[string]struct{} {
+func (t *TemplateLib) findApplicableTemplate(ctx context.Context, instructions []Instruction, item map[string]any) map[string]struct{} {
 	templateSet := make(map[string]struct{})
 
 	for _, instr := range instructions {
@@ -86,9 +116,9 @@ func (t *TemplateLib) findApplicableTemplate(instructions []Instruction, item ma
 		}
 
 		if instr.If != "" {
-			match, err := t.evaluateCondition(instr.If, item, ctx)
+			match, err := t.evaluateCondition(ctx, instr.If, item)
 			if err != nil {
-				// TODO: Log error while evaluating condition
+				logger.FromContext(ctx).With("component", "template_lib").Warn("Failed to evaluate condition", zap.Error(err))
 				continue
 			}
 			if !match {
@@ -113,7 +143,7 @@ func (t *TemplateLib) findApplicableTemplate(instructions []Instruction, item ma
 	return templateSet
 }
 
-func (t *TemplateLib) combineTemplates(instructions []Instruction, templateSet map[string]struct{}, item map[string]any, ctx map[string]any) map[string]any {
+func (t *TemplateLib) combineTemplates(ctx context.Context, instructions []Instruction, templateSet map[string]struct{}, item map[string]any) map[string]any {
 	combined := make(map[string]any)
 
 	for _, instr := range instructions {
@@ -126,13 +156,13 @@ func (t *TemplateLib) combineTemplates(instructions []Instruction, templateSet m
 			continue
 		}
 
-		t.applyTemplateSpec(instr.Spec, combined, item, ctx)
+		t.applyTemplateSpec(ctx, instr.Spec, combined, item)
 	}
 
 	return combined
 }
 
-func (t *TemplateLib) applyTemplateSpec(spec map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyTemplateSpec(ctx context.Context, spec map[string]any, combined map[string]any, item map[string]any) {
 	for key, value := range spec {
 		if strings.TrimSpace(key) == "if" {
 			continue
@@ -140,42 +170,42 @@ func (t *TemplateLib) applyTemplateSpec(spec map[string]any, combined map[string
 
 		switch val := value.(type) {
 		case map[string]any:
-			t.applyMapValue(key, val, combined, item, ctx)
+			t.applyMapValue(ctx, key, val, combined, item)
 		default:
 			combined[key] = val
 		}
 	}
 }
 
-func (t *TemplateLib) applyMapValue(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyMapValue(ctx context.Context, key string, val map[string]any, combined map[string]any, item map[string]any) {
 	typeRaw, hasType := val["type"]
 	if !hasType {
-		t.applyNestedObject(key, val, combined, item, ctx)
+		t.applyNestedObject(ctx, key, val, combined, item)
 		return
 	}
 
 	typeStr, _ := typeRaw.(string)
 	switch typeStr {
 	case "string":
-		if err := t.processStringValue(key, val, combined, item, ctx); err != nil {
-			// TODO: log error
+		if err := t.processStringValue(ctx, key, val, combined, item); err != nil {
+			logger.FromContext(ctx).With("component", "template_lib").Warn("Failed to process string", zap.Error(err))
 		}
 	case "number":
-		t.processNumberValue(key, val, combined, item, ctx)
+		t.processNumberValue(ctx, key, val, combined, item)
 	case "array":
-		t.processArrayValue(key, val, combined, item, ctx)
+		t.processArrayValue(ctx, key, val, combined, item)
 	case "bool":
 		if boolVal, ok := val["value"].(bool); ok {
 			combined[key] = boolVal
 		}
 	case "object":
-		t.applyNestedObject(key, val, combined, item, ctx)
+		t.applyNestedObject(ctx, key, val, combined, item)
 	default:
 		combined[key] = val
 	}
 }
 
-func (t *TemplateLib) applyNestedObject(key string, val map[string]any, combined map[string]any, item, ctx map[string]any) {
+func (t *TemplateLib) applyNestedObject(ctx context.Context, key string, val map[string]any, combined map[string]any, item map[string]any) {
 	valueRaw, ok := val["value"].(map[string]any)
 	if !ok {
 		combined[key] = val
@@ -186,7 +216,7 @@ func (t *TemplateLib) applyNestedObject(key string, val map[string]any, combined
 	for subKey, subVal := range valueRaw {
 		switch typedVal := subVal.(type) {
 		case map[string]any:
-			t.applyMapValue(subKey, typedVal, subResult, item, ctx)
+			t.applyMapValue(ctx, subKey, typedVal, subResult, item)
 		default:
 			subResult[subKey] = typedVal
 		}
@@ -202,9 +232,9 @@ func (t *TemplateLib) applyNestedObject(key string, val map[string]any, combined
 	}
 }
 
-func (t *TemplateLib) processStringValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) error {
+func (t *TemplateLib) processStringValue(ctx context.Context, key string, val map[string]any, result map[string]any, item map[string]any) error {
 	var errList []error
-
+	contextAny := ctx.Value(DataKey).(map[string]any)
 	if pathValue, exists := val["path"]; exists {
 		pathStr, ok := pathValue.(string)
 		if !ok {
@@ -212,7 +242,7 @@ func (t *TemplateLib) processStringValue(key string, val map[string]any, result 
 		} else {
 			resolvedValue, err := gval.Evaluate(pathStr, map[string]interface{}{
 				"item":    item,
-				"context": ctx,
+				"context": contextAny,
 			})
 			if err != nil {
 				errList = append(errList, fmt.Errorf("error resolving path for key %s: %w", key, err))
@@ -223,7 +253,7 @@ func (t *TemplateLib) processStringValue(key string, val map[string]any, result 
 		}
 	} else if valValue, exists := val["value"]; exists {
 		if tmpl, ok := valValue.(string); ok {
-			interpolated, err := t.interpolateString(tmpl, item, ctx)
+			interpolated, err := t.interpolateString(ctx, tmpl, item)
 			if err != nil {
 				errList = append(errList, fmt.Errorf("error interpolating string for key %s: %w", key, err))
 				result[key] = tmpl
@@ -241,30 +271,30 @@ func (t *TemplateLib) processStringValue(key string, val map[string]any, result 
 	return nil
 }
 
-func (t *TemplateLib) processNumberValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
+func (t *TemplateLib) processNumberValue(ctx context.Context, key string, val map[string]any, result map[string]any, item map[string]any) {
 	pathValue, exists := val["path"]
 	if !exists {
 		return
 	}
 	pathStr, ok := pathValue.(string)
 	if !ok {
-		// TODO: log error
+		logger.FromContext(ctx).With("component", "template_lib").Warn("Path value is not a string for key: %s", key)
 		return
 	}
-
+	contextAny := ctx.Value(DataKey).(map[string]any)
 	resolvedValue, err := gval.Evaluate(pathStr, map[string]interface{}{
 		"item":    item,
-		"context": ctx,
+		"context": contextAny,
 	})
 	if err != nil {
-		// TODO: log error
+		logger.FromContext(ctx).With("component", "template_lib").Warn("Error resolving path for key %s: %v", key, err)
 		result[key] = nil
 	} else {
 		result[key] = resolvedValue
 	}
 }
 
-func (t *TemplateLib) processArrayValue(key string, val map[string]any, result map[string]any, item map[string]any, ctx map[string]any) {
+func (t *TemplateLib) processArrayValue(ctx context.Context, key string, val map[string]any, result map[string]any, item map[string]any) {
 	rawArr, exists := val["value"]
 	if !exists {
 		return
@@ -282,7 +312,7 @@ func (t *TemplateLib) processArrayValue(key string, val map[string]any, result m
 		}
 		if condRaw, hasCond := subMap["if"]; hasCond {
 			if condStr, ok := condRaw.(string); ok && condStr != "" {
-				match, err := t.evaluateCondition(condStr, item, ctx)
+				match, err := t.evaluateCondition(ctx, condStr, item)
 				if err != nil || !match {
 					continue
 				}
@@ -295,7 +325,7 @@ func (t *TemplateLib) processArrayValue(key string, val map[string]any, result m
 			}
 			switch castV2 := v2.(type) {
 			case map[string]any:
-				t.applyMapValue(k2, castV2, elemResult, item, ctx)
+				t.applyMapValue(ctx, k2, castV2, elemResult, item)
 			default:
 				elemResult[k2] = castV2
 			}
@@ -305,10 +335,22 @@ func (t *TemplateLib) processArrayValue(key string, val map[string]any, result m
 	result[key] = processed
 }
 
-func (t *TemplateLib) interpolateString(templateStr string, item map[string]any, ctx map[string]any) (string, error) {
+func (t *TemplateLib) handleProviderCall(providerName, methodName string, data map[string]interface{}) (interface{}, error) {
+	t.mu.RLock()
+	p, exists := t.providers[providerName]
+	t.mu.RUnlock()
+	if !exists {
+		return nil, fmt.Errorf("provider %s not found", providerName)
+	}
+
+	return p.ExecuteMethod(context.Background(), methodName, data)
+}
+
+func (t *TemplateLib) interpolateString(ctx context.Context, templateStr string, item map[string]any) (string, error) {
+	contextAny, _ := ctx.Value(DataKey).(map[string]any)
 	tmpl, err := template.New("interpolation").Funcs(template.FuncMap{
 		"item":    func() map[string]any { return item },
-		"context": func() map[string]any { return ctx },
+		"context": func() map[string]any { return contextAny },
 	}).Parse(templateStr)
 	if err != nil {
 		return templateStr, fmt.Errorf("error parsing template: %w", err)
@@ -321,10 +363,11 @@ func (t *TemplateLib) interpolateString(templateStr string, item map[string]any,
 	return buf.String(), nil
 }
 
-func (t *TemplateLib) evaluateCondition(condition string, item map[string]any, ctx map[string]any) (bool, error) {
+func (t *TemplateLib) evaluateCondition(ctx context.Context, condition string, item map[string]any) (bool, error) {
+	contextAny := ctx.Value(DataKey).(map[string]any)
 	params := map[string]interface{}{
 		"item":    item,
-		"context": ctx,
+		"context": contextAny,
 	}
 
 	if err := t.validateKeys(condition, params); err != nil {
