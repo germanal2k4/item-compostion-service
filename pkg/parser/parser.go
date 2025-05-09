@@ -24,7 +24,7 @@ const (
 )
 
 type TemplateLib struct {
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	providers map[string]provider.Provider
 }
 
@@ -96,7 +96,7 @@ func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, i
 	combinedResult := t.combineTemplates(ctx, instructions, templateSet, item)
 
 	if len(combinedResult) == 0 {
-		logger.FromContext(ctx).With("component", "template_lib").Warn("no combined result")
+		logger.FromContext(ctx).With("component", "template_lib").Warn("No combined result")
 	}
 
 	finalJSON, err := json.MarshalIndent(combinedResult, "", "  ")
@@ -118,7 +118,7 @@ func (t *TemplateLib) findApplicableTemplate(ctx context.Context, instructions [
 		if instr.If != "" {
 			match, err := t.evaluateCondition(ctx, instr.If, item)
 			if err != nil {
-				logger.FromContext(ctx).With("component", "template_lib").Warn("failed to evaluate condition", zap.Error(err))
+				logger.FromContext(ctx).With("component", "template_lib").Warn("Failed to evaluate condition", zap.Error(err))
 				continue
 			}
 			if !match {
@@ -188,7 +188,7 @@ func (t *TemplateLib) applyMapValue(ctx context.Context, key string, val map[str
 	switch typeStr {
 	case "string":
 		if err := t.processStringValue(ctx, key, val, combined, item); err != nil {
-			logger.FromContext(ctx).With("component", "template_lib").Warn("failed to process string", zap.Error(err))
+			logger.FromContext(ctx).With("component", "template_lib").Warn("Failed to process string", zap.Error(err))
 		}
 	case "number":
 		t.processNumberValue(ctx, key, val, combined, item)
@@ -278,7 +278,7 @@ func (t *TemplateLib) processNumberValue(ctx context.Context, key string, val ma
 	}
 	pathStr, ok := pathValue.(string)
 	if !ok {
-		logger.FromContext(ctx).With("component", "template_lib").Warn("path value is not a string for key: %s", key)
+		logger.FromContext(ctx).With("component", "template_lib").Warn("Path value is not a string for key: %s", key)
 		return
 	}
 	contextAny := ctx.Value(DataKey).(map[string]any)
@@ -287,7 +287,7 @@ func (t *TemplateLib) processNumberValue(ctx context.Context, key string, val ma
 		"context": contextAny,
 	})
 	if err != nil {
-		logger.FromContext(ctx).With("component", "template_lib").Warn("error resolving path for key %s: %v", key, err)
+		logger.FromContext(ctx).With("component", "template_lib").Warn("Error resolving path for key %s: %v", key, err)
 		result[key] = nil
 	} else {
 		result[key] = resolvedValue
@@ -336,7 +336,9 @@ func (t *TemplateLib) processArrayValue(ctx context.Context, key string, val map
 }
 
 func (t *TemplateLib) handleProviderCall(providerName, methodName string, data map[string]interface{}) (interface{}, error) {
+	t.mu.RLock()
 	p, exists := t.providers[providerName]
+	t.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("provider %s not found", providerName)
 	}

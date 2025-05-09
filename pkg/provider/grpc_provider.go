@@ -11,14 +11,6 @@ import (
 	"time"
 )
 
-type RetryConfig struct {
-	MaxAttempts       int           `json:"maxAttempts"`
-	InitialBackoff    time.Duration `json:"initialBackoff"`
-	MaxBackoff        time.Duration `json:"maxBackoff"`
-	BackoffMultiplier float64       `json:"backoffMultiplier"`
-	RetryableCodes    []string      `json:"retryableCodes"`
-}
-
 type GRPCProvider struct {
 	spec    *ProviderSpec
 	conn    *grpc.ClientConn
