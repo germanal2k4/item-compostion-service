@@ -504,7 +504,6 @@ func TestProcessArrayValue_ObjectItem(t *testing.T) {
 }
 
 func TestEnvironmentVariableInterpolation(t *testing.T) {
-	// Set up test environment variables
 	os.Setenv("TEST_VAR", "test_value")
 	os.Setenv("NUMBER_VAR", "42")
 	defer os.Unsetenv("TEST_VAR")
