@@ -12,6 +12,7 @@ import (
 	"io"
 	"item_compositiom_service/pkg/logger"
 	"item_compositiom_service/pkg/provider"
+	"runtime"
 	"strings"
 	"sync"
 	"text/template"
@@ -49,6 +50,8 @@ type Instruction struct {
 }
 
 func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) {
+	metrics := NewMetricsCollector("template_parser")
+
 	var tmpInstructions []Instruction
 	decoder := yaml.NewDecoder(bytes.NewReader(templateData))
 
@@ -59,18 +62,23 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			if errors.Is(err, io.EOF) {
 				break
 			}
+			metrics.RecordSyntaxError()
 			return nil, fmt.Errorf("error parsing YAML: %w", err)
 		}
+
+		metrics.RecordTemplateVersion(instr.Version)
 
 		if instr.Kind == "ProviderGRPC" {
 			parser := provider.NewGRPCProviderParser()
 			spec, err := parser.Parse(templateData)
 			if err != nil {
+				metrics.RecordSemanticError()
 				return nil, fmt.Errorf("error parsing provider spec: %w", err)
 			}
 
 			grpcProvider, err := provider.NewGRPCProvider(spec)
 			if err != nil {
+				metrics.RecordSemanticError()
 				return nil, fmt.Errorf("error creating provider: %w", err)
 			}
 
@@ -83,15 +91,31 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 				instr.If = ifCondition
 			}
 		}
+
+		for field := range instr.Spec {
+			metrics.RecordFieldUsage(field)
+		}
+
 		tmpInstructions = append(tmpInstructions, instr)
 	}
+
+	metrics.RecordValidationTime()
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	metrics.RecordMemoryUsage(int64(m.Alloc))
+
+	metrics.RecordConversionSpeed(len(tmpInstructions))
 
 	return tmpInstructions, nil
 }
 
 func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, instructions []Instruction) ([]byte, error) {
+	metrics := NewMetricsCollector("template_adjuster")
 
 	templateSet := t.findApplicableTemplate(ctx, instructions, item)
+
+	metrics.RecordSemanticCheckTime()
 
 	combinedResult := t.combineTemplates(ctx, instructions, templateSet, item)
 
@@ -103,6 +127,8 @@ func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, i
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling final result: %w", err)
 	}
+
+	metrics.RecordConversionTime()
 
 	return finalJSON, nil
 }
