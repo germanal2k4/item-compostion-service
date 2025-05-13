@@ -3,8 +3,14 @@ package cache
 import (
 	"errors"
 	"item_compositiom_service/pkg/metrics"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	collector     *metricsCollector
+	initCollector sync.Once
 )
 
 type metricsCollector struct {
