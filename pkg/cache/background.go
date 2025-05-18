@@ -10,15 +10,15 @@ type backgroundEntry[V any] struct {
 	lastUpdated time.Time
 }
 
-type BackgroundSetGetter[K comparable, V any] struct {
+type backgroundSetGetter[K comparable, V any] struct {
 	data      map[K]*backgroundEntry[V]
 	mu        sync.RWMutex
 	entryPool sync.Pool
 	ttl       time.Duration
 }
 
-func NewBackgroundSetGetter[K comparable, V any](ttl time.Duration) *BackgroundSetGetter[K, V] {
-	return &BackgroundSetGetter[K, V]{
+func newBackgroundSetGetter[K comparable, V any](ttl time.Duration) *backgroundSetGetter[K, V] {
+	return &backgroundSetGetter[K, V]{
 		data: make(map[K]*backgroundEntry[V]),
 		entryPool: sync.Pool{
 			New: func() interface{} {
@@ -29,7 +29,7 @@ func NewBackgroundSetGetter[K comparable, V any](ttl time.Duration) *BackgroundS
 	}
 }
 
-func (s *BackgroundSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
+func (s *backgroundSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -44,7 +44,7 @@ func (s *BackgroundSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
 	s.data[k].value = v
 }
 
-func (s *BackgroundSetGetter[K, V]) Get(k K) (V, bool) {
+func (s *backgroundSetGetter[K, V]) Get(k K) (V, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -52,7 +52,7 @@ func (s *BackgroundSetGetter[K, V]) Get(k K) (V, bool) {
 	return v.value, ok
 }
 
-func (s *BackgroundSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
+func (s *backgroundSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -64,7 +64,7 @@ func (s *BackgroundSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
 	return v.lastUpdated, true
 }
 
-func (s *BackgroundSetGetter[K, V]) CleanUp() int {
+func (s *backgroundSetGetter[K, V]) CleanUp() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -81,7 +81,7 @@ func (s *BackgroundSetGetter[K, V]) CleanUp() int {
 	return cleaned
 }
 
-func (s *BackgroundSetGetter[K, V]) Len() int {
+func (s *backgroundSetGetter[K, V]) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

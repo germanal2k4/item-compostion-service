@@ -72,9 +72,9 @@ func New[K comparable, V any](
 
 	if cfg.Type == Background {
 		cache.closed = make(chan struct{})
-		cache.setGetter = NewBackgroundSetGetter[K, V](cfg.TTL)
+		cache.setGetter = newBackgroundSetGetter[K, V](cfg.TTL)
 	} else {
-		cache.setGetter = NewLruSetGetter[K, V](cfg.Capacity, cfg.TTL)
+		cache.setGetter = newLruSetGetter[K, V](cfg.Capacity, cfg.TTL)
 	}
 
 	return &cache
