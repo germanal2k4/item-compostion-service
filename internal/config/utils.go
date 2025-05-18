@@ -2,13 +2,16 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
+	localdb "item_compositiom_service/internal/repository/local_db"
+	mongodb "item_compositiom_service/internal/repository/mongo_db"
 	"item_compositiom_service/internal/server"
 	"item_compositiom_service/pkg/logger"
 	"item_compositiom_service/pkg/metrics"
 	"item_compositiom_service/pkg/tracer"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func ParseConfig(path string) (*Config, error) {
@@ -96,6 +99,31 @@ func getDefaultConfig() *Config {
 		MetricsConfig: &metrics.Config{
 			Enable: true,
 			Port:   8080,
+		},
+		MongoConfig: &mongodb.MongoStorageConfig{
+			Enabled:                 true,
+			DSN:                     "mongodb://localhost:27017",
+			Database:                "item_composition_service",
+			ClientConfigsCollection: "client_configs",
+			ClientSpecsCollection:   "client_specs",
+			TemplatesCollection:     "templates",
+			OperationTimeout:        2 * time.Second,
+			ConnectionTimeout:       1 * time.Second,
+			MaxPoolSize:             1000,
+			ReadPreference:          "secondary",
+			HeartbeatFrequency:      2 * time.Second,
+			LoggingConfig: &mongodb.LoggingConfig{
+				Enabled:            true,
+				QueryMaxBytesToLog: 512,
+			},
+		},
+		LocalConfig: &localdb.LocalStorageConfig{
+			LoggingConfig: &localdb.LoggingConfig{
+				Enabled: true,
+			},
+			ClientConfigDirPath: "/var/data/item-composition-service/client-configs",
+			ClientSpecDirPath:   "/var/data/item-composition-service/client-specs",
+			TemplateDirPath:     "/var/data/item-composition-service/templates",
 		},
 	}
 }
