@@ -71,7 +71,7 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			t.metrics.errorsCount.WithLabelValues("parse_error").Inc()
+			t.metrics.errorsCount.WithLabelValues("parse_error", "yaml_decode_error").Inc()
 			return nil, fmt.Errorf("error parsing YAML: %w", err)
 		}
 
@@ -79,13 +79,13 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			parser := provider.NewGRPCProviderParser()
 			spec, err := parser.Parse(templateData)
 			if err != nil {
-				t.metrics.errorsCount.WithLabelValues("provider_parse_error").Inc()
+				t.metrics.errorsCount.WithLabelValues("provider_parse_error", "provider_spec_error").Inc()
 				return nil, fmt.Errorf("error parsing provider spec: %w", err)
 			}
 
 			grpcProvider, err := provider.NewGRPCProvider(spec)
 			if err != nil {
-				t.metrics.errorsCount.WithLabelValues("provider_create_error").Inc()
+				t.metrics.errorsCount.WithLabelValues("provider_create_error", "provider_init_error").Inc()
 				return nil, fmt.Errorf("error creating provider: %w", err)
 			}
 
@@ -120,7 +120,7 @@ func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, i
 
 	finalJSON, err := json.MarshalIndent(combinedResult, "", "  ")
 	if err != nil {
-		t.metrics.errorsCount.WithLabelValues("adjust_error").Inc()
+		t.metrics.errorsCount.WithLabelValues("adjust_error", "json_marshal_error").Inc()
 		return nil, fmt.Errorf("error marshaling final result: %w", err)
 	}
 

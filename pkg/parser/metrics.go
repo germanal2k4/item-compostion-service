@@ -31,7 +31,7 @@ func newMetricsCollector(registry metrics.MetricsRegistry) (*metricsCollector, e
 	metrics.errorsCount = *prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "parser_errors_total",
 		Help: "Total number of parser errors",
-	}, []string{"error_type"})
+	}, []string{"error_type", "error_code"})
 
 	metrics.parseRequestCount = *prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "parser_parse_requests_total",
