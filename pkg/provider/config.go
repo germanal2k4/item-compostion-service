@@ -1,6 +1,10 @@
 package provider
 
-import "time"
+import (
+	"time"
+
+	"github.com/jhump/protoreflect/desc"
+)
 
 type ProviderConfig struct {
 	Transport TransportConfig `yaml:"transport"`
@@ -31,14 +35,15 @@ type PayloadConfig struct {
 }
 
 type MethodConfig struct {
-	Package  string         `yaml:"package"`
-	Service  string         `yaml:"service"`
-	Method   string         `yaml:"method"`
-	Type     ProviderType   `yaml:"type"`
-	Timeout  time.Duration  `yaml:"timeout"`
-	Filter   FilterConfig   `yaml:"filter"`
-	Request  RequestConfig  `yaml:"request"`
-	Response ResponseConfig `yaml:"response"`
+	Package  string                 `yaml:"package"`
+	Service  string                 `yaml:"service"`
+	Method   string                 `yaml:"method"`
+	Type     ProviderType           `yaml:"type"`
+	Timeout  time.Duration          `yaml:"timeout"`
+	Filter   FilterConfig           `yaml:"filter"`
+	Request  RequestConfig          `yaml:"request"`
+	Response ResponseConfig         `yaml:"response"`
+	desc     *desc.MethodDescriptor `yaml:"-"`
 }
 
 type FilterConfig struct {

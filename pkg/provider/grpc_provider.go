@@ -2,20 +2,31 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
+	"sync"
+	"time"
+
 	"github.com/PaesslerAG/gval"
+	"github.com/jhump/protoreflect/desc/protoparse"
+	"github.com/jhump/protoreflect/dynamic"
+	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"net"
-	"time"
 )
 
 type GRPCProvider struct {
+	mu      sync.Mutex
 	spec    *ProviderSpec
 	conn    *grpc.ClientConn
 	methods map[string]*MethodConfig
 	retry   *RetryConfig
+
+	protoSet   bool
+	msgFactory *dynamic.MessageFactory
+	stub       grpcdynamic.Stub
 }
 
 func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
@@ -49,14 +60,47 @@ func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
 
 	return &GRPCProvider{
 		spec:    spec,
-		conn:    conn,
 		methods: methods,
+		conn:    conn,
 		retry:   retryConfig,
+		stub:    grpcdynamic.NewStub(conn),
 	}, nil
 }
 
 func (p *GRPCProvider) GetName() string {
 	return p.spec.Metadata.Name
+}
+
+func (p *GRPCProvider) SetProto(proto []byte) error {
+	filename := p.spec.Metadata.Name + ".proto"
+	parser := protoparse.Parser{
+		Accessor: protoparse.FileContentsFromMap(map[string]string{
+			filename: string(proto),
+		}),
+	}
+
+	fds, err := parser.ParseFiles(filename)
+	if err != nil {
+		return fmt.Errorf("failed to parse proto: %w", err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, method := range p.methods {
+		service := fds[0].FindService(method.Service)
+		if service == nil {
+			return fmt.Errorf("service %s not found in proto", method.Service)
+		}
+
+		method.desc = service.FindMethodByName(method.Method)
+		if method.desc == nil {
+			return fmt.Errorf("method %s not found in proto", method.Method)
+		}
+	}
+	p.msgFactory = dynamic.NewMessageFactoryWithDefaults()
+
+	p.protoSet = true
+	return nil
 }
 
 func (p *GRPCProvider) GetMethod(methodName string) (*MethodConfig, error) {
@@ -130,8 +174,27 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 }
 
 func (p *GRPCProvider) executeGRPCCall(ctx context.Context, method *MethodConfig, data map[string]interface{}) (interface{}, error) {
-	// TODO: Implement actual gRPC call based on method configuration
-	return nil, fmt.Errorf("not implemented")
+	rd := p.msgFactory.NewDynamicMessage(method.desc.GetInputType())
+
+	// Заполнение запроса TODO
+
+	responseMsg, err := p.stub.InvokeRpc(
+		ctx,
+		method.desc,
+		rd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to invoke gRPC method: %w", err)
+	}
+
+	// Обработка ответа
+	jsonResponse, _ := responseMsg.(*dynamic.Message).MarshalJSON()
+	var res interface{}
+	if err := json.Unmarshal(jsonResponse, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return res, nil
 }
 
 func (p *GRPCProvider) evaluateFilter(condition string, data map[string]interface{}) (bool, error) {
