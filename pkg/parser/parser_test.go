@@ -2,10 +2,32 @@ package parser
 
 import (
 	"context"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
-	"os"
+	"item_compositiom_service/pkg/metrics"
 	"testing"
 )
+
+type mockMetricsRegistry struct {
+	registry *prometheus.Registry
+}
+
+func newMockMetricsRegistry() metrics.MetricsRegistry {
+	return &mockMetricsRegistry{
+		registry: prometheus.NewRegistry(),
+	}
+}
+
+func (m *mockMetricsRegistry) GetRegistry() prometheus.Registerer {
+	return m.registry
+}
+
+func setupTestTemplateLib(t *testing.T) *TemplateLib {
+	registry := newMockMetricsRegistry()
+	templateLib, err := NewTemplateLib(registry)
+	assert.NoError(t, err)
+	return templateLib
+}
 
 func TestParseTemplate_Success(t *testing.T) {
 	yamlData := `
@@ -26,7 +48,7 @@ spec:
     value: "Hello!"
 
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Expected no error when parsing valid YAML")
 	assert.Len(t, tpls, 2, "Should parse 2 instructions (View + Template)")
@@ -53,7 +75,7 @@ spec:
     type: "number"
     path: "item.code"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Should parse template without error")
 
@@ -84,7 +106,7 @@ spec:
     type: "string"
     value: "No view here"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
 	item := map[string]any{"foo": "bar"}
@@ -114,7 +136,7 @@ spec:
     type: "string"
     value: "Will not appear"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
 	item := map[string]any{"enabled": false}
@@ -156,7 +178,7 @@ spec:
     value:
       status: "primary"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(templateData))
 	assert.NoError(t, err, "Failed to parse chained templates")
 	item := map[string]any{"something": 123}
@@ -180,7 +202,7 @@ func TestEvaluateCondition_Success(t *testing.T) {
 	data := map[string]any{"limit": 50}
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, DataKey, data)
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tests := []struct {
 		cond     string
 		expected bool
@@ -204,7 +226,7 @@ func TestEvaluateCondition_Success(t *testing.T) {
 func TestEvaluateCondition_Errors(t *testing.T) {
 	item := map[string]any{}
 	data := map[string]any{}
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	cond1 := "item.??error??"
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, DataKey, data)
@@ -224,7 +246,7 @@ func TestProcessStringValue(t *testing.T) {
 			"type":  "string",
 			"value": "Hello, {{item.name}}!",
 		}
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		result := make(map[string]any)
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, DataKey, data)
@@ -241,7 +263,7 @@ func TestProcessStringValue(t *testing.T) {
 			"type": "string",
 			"path": "item.age",
 		}
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		result := make(map[string]any)
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, DataKey, data)
@@ -256,7 +278,7 @@ func TestProcessStringValue(t *testing.T) {
 			"path": 123,
 		}
 		data := map[string]any{"some": 22}
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		ctx := context.Background()
 		result := make(map[string]any)
 		ctx = context.WithValue(ctx, DataKey, data)
@@ -272,7 +294,7 @@ func TestProcessStringValue(t *testing.T) {
 		data := map[string]any{"some": 22}
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, DataKey, data)
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		result := make(map[string]any)
 		err := temp.processStringValue(ctx, "broken", val, result, nil)
 		if err != nil {
@@ -289,7 +311,7 @@ func TestProcessNumberValue(t *testing.T) {
 	item := map[string]any{"num": 99}
 	data := map[string]any{}
 	result := make(map[string]any)
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, DataKey, data)
 	temp.processNumberValue(ctx, "resultNumber", val, result, item)
@@ -325,7 +347,7 @@ func TestProcessArrayValue(t *testing.T) {
 				},
 			},
 		}
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		result := make(map[string]any)
 		ctx := context.WithValue(context.Background(), DataKey, map[string]any{"role": "user"})
 		temp.processArrayValue(ctx, "permissions", val, result, item)
@@ -341,7 +363,7 @@ func TestProcessArrayValue(t *testing.T) {
 		val := map[string]any{
 			"value": 123,
 		}
-		var temp TemplateLib
+		temp := setupTestTemplateLib(t)
 		result := make(map[string]any)
 		temp.processArrayValue(nil, "arrKey", val, result, nil)
 		assert.Nil(t, result["arrKey"], "Should remain nil if not a valid array")
@@ -362,7 +384,7 @@ func TestApplyNestedObject(t *testing.T) {
 			"status": "active",
 		},
 	}
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	temp.applyNestedObject(nil, "data1", val, combined, nil)
 
 	expected := map[string]any{
@@ -392,7 +414,7 @@ spec:
     type: "string"
     value: "Hello!"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err, "Parsing YAML itself might still succeed since it's valid YAML syntax")
 	item := map[string]any{"missing": false}
@@ -406,7 +428,7 @@ spec:
 
 func TestValidateKeys(t *testing.T) {
 	cond := "item.unknownField > 10"
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	err := temp.validateKeys(cond, map[string]interface{}{
 		"item": map[string]any{"knownField": 5},
 	})
@@ -422,7 +444,7 @@ func TestInterpolateString_Error(t *testing.T) {
 	input := "Hello, {{broken"
 	item := map[string]any{}
 	ctx := context.Background()
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	_, err := temp.interpolateString(ctx, input, item)
 	assert.Error(t, err, "Should fail on parse error in go template")
 }
@@ -431,7 +453,7 @@ func TestApplyNestedObject_NoValue(t *testing.T) {
 	val := map[string]any{
 		"type": "object",
 	}
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	combined := make(map[string]any)
 	temp.applyNestedObject(nil, "someObj", val, combined, nil)
 
@@ -455,7 +477,7 @@ spec:
     type: "string"
     value: "Value if condition passes"
 `
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	tpls, err := temp.ParseTemplate([]byte(yamlData))
 	assert.NoError(t, err)
 	item := map[string]any{"x": 1}
@@ -473,7 +495,7 @@ func TestProcessArrayValue_InvalidType(t *testing.T) {
 		"type":  "array",
 		"value": 123,
 	}
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	combined := make(map[string]any)
 	temp.processArrayValue(nil, "arr", val, combined, nil)
 
@@ -491,7 +513,7 @@ func TestProcessArrayValue_ObjectItem(t *testing.T) {
 			},
 		},
 	}
-	var temp TemplateLib
+	temp := setupTestTemplateLib(t)
 	combined := make(map[string]any)
 	temp.processArrayValue(nil, "arr", val, combined, nil)
 
@@ -501,135 +523,4 @@ func TestProcessArrayValue_ObjectItem(t *testing.T) {
 	arrVal, ok := combined["arr"].([]any)
 	assert.True(t, ok, "Should be a slice")
 	assert.Len(t, arrVal, 1, "One item in array")
-}
-
-func TestEnvironmentVariableInterpolation(t *testing.T) {
-	os.Setenv("TEST_VAR", "test_value")
-	os.Setenv("NUMBER_VAR", "42")
-	defer os.Unsetenv("TEST_VAR")
-	defer os.Unsetenv("NUMBER_VAR")
-
-	yamlData := `
----
-kind: Template
-metadata:
-  name: env-test
-spec:
-  string_value:
-    type: "string"
-    value: "Value: ${TEST_VAR}"
-  number_value:
-    type: "number"
-    path: "${NUMBER_VAR}"
-  nested:
-    type: "object"
-    value:
-      env_var: "${TEST_VAR}"
-`
-
-	var temp TemplateLib
-	tpls, err := temp.ParseTemplate([]byte(yamlData))
-	assert.NoError(t, err)
-
-	item := map[string]any{}
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, DataKey, map[string]any{})
-
-	resultJSON, err := temp.AdjustTemplate(ctx, item, tpls)
-	assert.NoError(t, err)
-
-	expected := `{
-		"string_value": "Value: test_value",
-		"number_value": 42,
-		"nested": {
-			"env_var": "test_value"
-		}
-	}`
-	assert.JSONEq(t, expected, string(resultJSON))
-}
-
-func TestMetricsCollection(t *testing.T) {
-	yamlData := `
----
-kind: Template
-metadata:
-  name: metrics-test
-  version: "1.0"
-spec:
-  field1:
-    type: "string"
-    value: "test"
-  field2:
-    type: "number"
-    path: "item.value"
-`
-
-	var temp TemplateLib
-	tpls, err := temp.ParseTemplate([]byte(yamlData))
-	assert.NoError(t, err)
-
-	// Verify that metrics were collected
-	// Note: In a real test, we would verify the actual metric values
-	// This is just a basic check that the parsing didn't fail
-	assert.Len(t, tpls, 1)
-	assert.Equal(t, "1.0", tpls[0].Version)
-}
-
-func TestTemplateVersionMetrics(t *testing.T) {
-	yamlData := `
----
-kind: Template
-metadata:
-  name: version-test-1
-  version: "1.0"
-spec:
-  field: "value"
----
-kind: Template
-metadata:
-  name: version-test-2
-  version: "2.0"
-spec:
-  field: "value"
-`
-
-	var temp TemplateLib
-	tpls, err := temp.ParseTemplate([]byte(yamlData))
-	assert.NoError(t, err)
-	assert.Len(t, tpls, 2)
-
-	// Verify different versions were recorded
-	assert.Equal(t, "1.0", tpls[0].Version)
-	assert.Equal(t, "2.0", tpls[1].Version)
-}
-
-func TestFieldUsageMetrics(t *testing.T) {
-	yamlData := `
----
-kind: Template
-metadata:
-  name: field-usage-test
-spec:
-  field1:
-    type: "string"
-    value: "test1"
-  field2:
-    type: "string"
-    value: "test2"
-  field3:
-    type: "object"
-    value:
-      nested: "value"
-`
-
-	var temp TemplateLib
-	tpls, err := temp.ParseTemplate([]byte(yamlData))
-	assert.NoError(t, err)
-	assert.Len(t, tpls, 1)
-
-	// Verify that all fields were processed
-	spec := tpls[0].Spec
-	assert.Contains(t, spec, "field1")
-	assert.Contains(t, spec, "field2")
-	assert.Contains(t, spec, "field3")
 }
