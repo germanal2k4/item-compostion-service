@@ -4,13 +4,11 @@ go 1.23.5
 
 require (
 	github.com/PaesslerAG/gval v1.2.4
-	github.com/golang/protobuf v1.5.4
 	github.com/mattn/go-isatty v0.0.20
 	github.com/olivere/elastic/v7 v7.0.32
 	github.com/prometheus/client_golang v1.21.1
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
-	go.elastic.co/ecszap v1.0.3
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.35.0
 	go.opentelemetry.io/otel/sdk v1.35.0
