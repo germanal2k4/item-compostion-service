@@ -26,27 +26,21 @@ const (
 )
 
 type TemplateLib struct {
-	mu        sync.RWMutex
-	providers map[string]provider.Provider
-	metrics   *metricsCollector
+	mu      sync.RWMutex
+	metrics *metricsCollector
+	storage *provider.ProviderStorage
 }
 
-func NewTemplateLib(metricsRegistry metrics.MetricsRegistry) (*TemplateLib, error) {
-	metrics, err := newMetricsCollector(metricsRegistry)
+func NewTemplateLib(metricsRegistry metrics.MetricsRegistry, storage *provider.ProviderStorage) (*TemplateLib, error) {
+	collector, err := newMetricsCollector(metricsRegistry)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics collector: %w", err)
+		return nil, fmt.Errorf("failed to create collector collector: %w", err)
 	}
 
 	return &TemplateLib{
-		providers: make(map[string]provider.Provider),
-		metrics:   metrics,
+		metrics: collector,
+		storage: storage,
 	}, nil
-}
-
-func (t *TemplateLib) RegisterProvider(p provider.Provider) {
-	t.mu.Lock()
-	t.providers[p.GetName()] = p
-	t.mu.Unlock()
 }
 
 type Instruction struct {
@@ -89,7 +83,7 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 				return nil, fmt.Errorf("error creating provider: %w", err)
 			}
 
-			t.RegisterProvider(grpcProvider)
+			t.storage.RegisterProvider(grpcProvider)
 			continue
 		}
 
@@ -354,17 +348,6 @@ func (t *TemplateLib) processArrayValue(ctx context.Context, key string, val map
 		processed = append(processed, elemResult)
 	}
 	result[key] = processed
-}
-
-func (t *TemplateLib) handleProviderCall(providerName, methodName string, data map[string]interface{}) (interface{}, error) {
-	t.mu.RLock()
-	p, exists := t.providers[providerName]
-	t.mu.RUnlock()
-	if !exists {
-		return nil, fmt.Errorf("provider %s not found", providerName)
-	}
-
-	return p.ExecuteMethod(context.Background(), methodName, data)
 }
 
 func (t *TemplateLib) interpolateString(ctx context.Context, templateStr string, item map[string]any) (string, error) {

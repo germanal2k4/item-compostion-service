@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"net"
 	"sync"
 	"time"
@@ -49,7 +53,6 @@ func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
 		method := &spec.Spec.Methods[i]
 		methods[method.Method] = method
 	}
-
 	retryConfig := &RetryConfig{
 		MaxAttempts:       3,
 		InitialBackoff:    time.Second,
@@ -96,6 +99,14 @@ func (p *GRPCProvider) SetProto(proto []byte) error {
 		if method.desc == nil {
 			return fmt.Errorf("method %s not found in proto", method.Method)
 		}
+
+		file := method.desc.GetFile().AsFileDescriptorProto()
+		fd, err := protodesc.NewFile(file, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create file descriptor for method %s: %w", method.Method, err)
+		}
+
+		method.inputMD = fd.Messages().ByName(protoreflect.Name(method.desc.GetInputType().GetName()))
 	}
 	p.msgFactory = dynamic.NewMessageFactoryWithDefaults()
 
@@ -174,9 +185,11 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 }
 
 func (p *GRPCProvider) executeGRPCCall(ctx context.Context, method *MethodConfig, data map[string]interface{}) (interface{}, error) {
-	rd := p.msgFactory.NewDynamicMessage(method.desc.GetInputType())
+	rd := dynamicpb.NewMessage(method.inputMD)
 
-	// Заполнение запроса TODO
+	if err := mapToDynamic(rd, data); err != nil {
+		return nil, fmt.Errorf("заполнение сообщения: %w", err)
+	}
 
 	responseMsg, err := p.stub.InvokeRpc(
 		ctx,
@@ -187,7 +200,6 @@ func (p *GRPCProvider) executeGRPCCall(ctx context.Context, method *MethodConfig
 		return nil, fmt.Errorf("failed to invoke gRPC method: %w", err)
 	}
 
-	// Обработка ответа
 	jsonResponse, _ := responseMsg.(*dynamic.Message).MarshalJSON()
 	var res interface{}
 	if err := json.Unmarshal(jsonResponse, &res); err != nil {
@@ -221,4 +233,14 @@ func (p *GRPCProvider) Close() error {
 		return p.conn.Close()
 	}
 	return nil
+}
+
+func mapToDynamic(msg *dynamicpb.Message, data map[string]interface{}) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	u := protojson.UnmarshalOptions{DiscardUnknown: false}
+	return u.Unmarshal(raw, msg)
 }

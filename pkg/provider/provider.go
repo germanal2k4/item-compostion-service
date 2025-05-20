@@ -30,6 +30,8 @@ type Provider interface {
 	GetMethod(methodName string) (*MethodConfig, error)
 
 	ExecuteMethod(ctx context.Context, methodName string, data map[string]interface{}) (interface{}, error)
+
+	Close() error
 }
 
 type Parser interface {
