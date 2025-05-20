@@ -9,6 +9,12 @@ grpc_server:
     start_deadline: 5s
     stop_deadline: 5s
     unix_socket_user: ""
+local_storage:
+    client_config_dir_path: /var/data/item-composition-service/client-configs
+    client_spec_dir_path: /var/data/item-composition-service/client-specs
+    logging:
+        enabled: true
+    template_dir_path: /var/data/item-composition-service/templates
 logger:
     dev_mode: true
     elastic_config:
@@ -23,6 +29,21 @@ logger:
 metrics:
     enable: true
     port: 8080
+mongo_storage:
+    client_configs_collection: client_configs
+    client_specs_collection: client_specs
+    connection_timeout: 1s
+    database: item_composition_service
+    dsn: mongodb://localhost:27017
+    enable: true
+    heartbeat_frequency: 2s
+    logging:
+        enable: true
+        query_max_bytes_to_log: 512
+    max_pool_size: 1000
+    operation_timeout: 2s
+    read_preference: secondary
+    templates_collection: templates
 trace:
     batch_span_processor:
         batch_timeout: 5s

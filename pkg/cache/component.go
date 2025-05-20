@@ -23,19 +23,18 @@ type Cache[K comparable, V any] struct {
 	mu     sync.Mutex
 	closed chan struct{}
 
-	fullUpdateFunc        func(SetGetter[K, V]) error
-	incrementalUpdateFunc func(SetGetter[K, V], K) error
+	fullUpdateFunc        func(context.Context, SetGetter[K, V]) error
+	incrementalUpdateFunc func(context.Context, SetGetter[K, V], K) error
 	cfg                   config
 	setGetter             SetGetter[K, V]
 	lgr                   *zap.Logger
-	collector             *metricsCollector
 }
 
 func New[K comparable, V any](
 	lgr *zap.SugaredLogger,
 	metrics metrics.MetricsRegistry,
-	fullUpdateFunc func(SetGetter[K, V]) error,
-	incrementalUpdateFunc func(SetGetter[K, V], K) error,
+	fullUpdateFunc func(context.Context, SetGetter[K, V]) error,
+	incrementalUpdateFunc func(context.Context, SetGetter[K, V], K) error,
 	opts ...Option,
 ) *Cache[K, V] {
 	cfg := config{
@@ -53,10 +52,13 @@ func New[K comparable, V any](
 		label = "lru_cache"
 	}
 
-	collector, err := newMetricsCollector(metrics)
-	if err != nil {
-		lgr.Error("Failed to create metrics", zap.Error(err))
-	}
+	var err error
+	initCollector.Do(func() {
+		collector, err = newMetricsCollector(metrics)
+		if err != nil {
+			lgr.Error("Failed to create metrics", zap.Error(err))
+		}
+	})
 
 	cache := Cache[K, V]{
 		cfg:                   cfg,
@@ -66,14 +68,13 @@ func New[K comparable, V any](
 			zap.String("component", label),
 			zap.String("cache_name", cfg.Name),
 		),
-		collector: collector,
 	}
 
 	if cfg.Type == Background {
 		cache.closed = make(chan struct{})
-		cache.setGetter = NewBackgroundSetGetter[K, V](cfg.TTL)
+		cache.setGetter = newBackgroundSetGetter[K, V](cfg.TTL)
 	} else {
-		cache.setGetter = NewLruSetGetter[K, V](cfg.Capacity, cfg.TTL)
+		cache.setGetter = newLruSetGetter[K, V](cfg.Capacity, cfg.TTL)
 	}
 
 	return &cache
@@ -87,19 +88,19 @@ func (c *Cache[K, V]) Start(ctx context.Context) (err error) {
 
 		c.lgr.Info("Starting first update cache")
 		start := time.Now()
-		err = c.fullUpdateFunc(c.setGetter)
+		err = c.fullUpdateFunc(ctx, c.setGetter)
 
 		dur := time.Since(start)
-		c.collector.fullUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
+		collector.fullUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
 
 		if err != nil {
-			c.collector.cacheErrors.WithLabelValues(c.cfg.Name, "full_update_error").Inc()
+			collector.cacheErrors.WithLabelValues(c.cfg.Name, "full_update_error").Inc()
 			c.lgr.Error("Failed to update cache", zap.Error(err))
 			return
 		}
 
-		c.collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
-		c.collector.cacheFullUpdates.WithLabelValues(c.cfg.Name).Inc()
+		collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
+		collector.cacheFullUpdates.WithLabelValues(c.cfg.Name).Inc()
 		c.lgr.Info("Cache updated successfully")
 	}()
 
@@ -128,29 +129,31 @@ func (c *Cache[K, V]) backgroundUpdate() {
 			case <-t.C:
 				c.mu.Lock()
 				if c.cfg.Type == Background {
+					ctx, cancel := context.WithTimeout(context.Background(), c.cfg.TTL)
+					defer cancel()
 					c.lgr.Info("Start full update cache")
 					start := time.Now()
-					err := c.fullUpdateFunc(c.setGetter)
+					err := c.fullUpdateFunc(ctx, c.setGetter)
 
 					dur := time.Since(start)
-					c.collector.fullUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
+					collector.fullUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
 
 					if err != nil {
-						c.collector.cacheErrors.WithLabelValues(c.cfg.Name, "full_update_error").Inc()
+						collector.cacheErrors.WithLabelValues(c.cfg.Name, "full_update_error").Inc()
 						c.lgr.Error("Failed to update cache", zap.Error(err))
 					} else {
-						c.collector.cacheFullUpdates.WithLabelValues(c.cfg.Name).Inc()
+						collector.cacheFullUpdates.WithLabelValues(c.cfg.Name).Inc()
 						c.lgr.Info("Cache updated successfully")
 					}
 				}
 
 				cleaned := c.setGetter.CleanUp()
 				if cleaned > 0 {
-					c.collector.cacheEvictions.WithLabelValues(c.cfg.Name).Add(float64(cleaned))
+					collector.cacheEvictions.WithLabelValues(c.cfg.Name).Add(float64(cleaned))
 					c.lgr.Info(fmt.Sprintf("Cleaned %d objects due ttl", cleaned))
 				}
 
-				c.collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
+				collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
 
 				c.mu.Unlock()
 			case <-c.closed:
@@ -161,33 +164,33 @@ func (c *Cache[K, V]) backgroundUpdate() {
 	}()
 }
 
-func (c *Cache[K, V]) IncrementalUpdate(key K) {
+func (c *Cache[K, V]) IncrementalUpdate(ctx context.Context, key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.lgr.Info("Start incremental update cache")
 	start := time.Now()
-	err := c.incrementalUpdateFunc(c.setGetter, key)
+	err := c.incrementalUpdateFunc(ctx, c.setGetter, key)
 
 	dur := time.Since(start)
-	c.collector.incrementalUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
+	collector.incrementalUpdateDurationHistogram.WithLabelValues(c.cfg.Name).Observe(dur.Seconds())
 
 	if err != nil {
-		c.collector.cacheErrors.WithLabelValues(c.cfg.Name, "incremental_update_error").Inc()
+		collector.cacheErrors.WithLabelValues(c.cfg.Name, "incremental_update_error").Inc()
 		c.lgr.Error("Failed to update cache", zap.Error(err))
 	} else {
-		c.collector.cacheIncrementalUpdates.WithLabelValues(c.cfg.Name).Inc()
+		collector.cacheIncrementalUpdates.WithLabelValues(c.cfg.Name).Inc()
 		c.lgr.Info("Cache updated successfully")
 	}
-	c.collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
+	collector.cacheSize.WithLabelValues(c.cfg.Name).Set(float64(c.setGetter.Len()))
 }
 
 func (c *Cache[K, V]) Get(k K) (V, bool) {
 	v, ok := c.setGetter.Get(k)
 	if !ok {
-		c.collector.cacheMisses.WithLabelValues(c.cfg.Name).Inc()
+		collector.cacheMisses.WithLabelValues(c.cfg.Name).Inc()
 	} else {
-		c.collector.cacheHits.WithLabelValues(c.cfg.Name).Inc()
+		collector.cacheHits.WithLabelValues(c.cfg.Name).Inc()
 	}
 
 	return v, ok

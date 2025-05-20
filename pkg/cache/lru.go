@@ -12,7 +12,7 @@ type lruEntry[K comparable, V any] struct {
 	lastUpdated time.Time
 }
 
-type LruSetGetter[K comparable, V any] struct {
+type lruSetGetter[K comparable, V any] struct {
 	data      map[K]*list.Element
 	list      *list.List
 	mu        sync.RWMutex
@@ -21,8 +21,8 @@ type LruSetGetter[K comparable, V any] struct {
 	capacity  int
 }
 
-func NewLruSetGetter[K comparable, V any](capacity int, ttl time.Duration) *LruSetGetter[K, V] {
-	return &LruSetGetter[K, V]{
+func newLruSetGetter[K comparable, V any](capacity int, ttl time.Duration) *lruSetGetter[K, V] {
+	return &lruSetGetter[K, V]{
 		data: make(map[K]*list.Element, capacity),
 		list: list.New(),
 		entryPool: sync.Pool{
@@ -35,7 +35,7 @@ func NewLruSetGetter[K comparable, V any](capacity int, ttl time.Duration) *LruS
 	}
 }
 
-func (l *LruSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
+func (l *lruSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -67,7 +67,7 @@ func (l *LruSetGetter[K, V]) Set(k K, v V, updateTime time.Time) {
 	l.data[k] = elem
 }
 
-func (l *LruSetGetter[K, V]) Get(k K) (V, bool) {
+func (l *lruSetGetter[K, V]) Get(k K) (V, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -87,7 +87,7 @@ func (l *LruSetGetter[K, V]) Get(k K) (V, bool) {
 	return res, false
 }
 
-func (l *LruSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
+func (l *lruSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -99,7 +99,7 @@ func (l *LruSetGetter[K, V]) LastUpdated(key K) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (l *LruSetGetter[K, V]) CleanUp() int {
+func (l *lruSetGetter[K, V]) CleanUp() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -116,14 +116,14 @@ func (l *LruSetGetter[K, V]) CleanUp() int {
 	return cleaned
 }
 
-func (l *LruSetGetter[K, V]) Len() int {
+func (l *lruSetGetter[K, V]) Len() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
 	return len(l.data)
 }
 
-func (l *LruSetGetter[K, V]) removeElement(elem *list.Element) {
+func (l *lruSetGetter[K, V]) removeElement(elem *list.Element) {
 	entry := elem.Value.(*lruEntry[K, V])
 	delete(l.data, entry.key)
 	l.entryPool.Put(entry)

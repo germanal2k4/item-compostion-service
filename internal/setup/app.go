@@ -1,14 +1,18 @@
 package setup
 
 import (
-	"go.uber.org/fx"
-	"go.uber.org/zap"
 	"item_compositiom_service/internal/config"
+	"item_compositiom_service/internal/repository"
+	localdb "item_compositiom_service/internal/repository/local_db"
+	mongodb "item_compositiom_service/internal/repository/mongo_db"
 	"item_compositiom_service/internal/server"
 	"item_compositiom_service/internal/services"
 	"item_compositiom_service/pkg/logger"
 	"item_compositiom_service/pkg/metrics"
 	"item_compositiom_service/pkg/tracer"
+
+	"go.uber.org/fx"
+	"go.uber.org/zap"
 )
 
 func Setup(configPath string) (*fx.App, error) {
@@ -29,6 +33,9 @@ func Setup(configPath string) (*fx.App, error) {
 			tracer.NewInterceptor,
 			metrics.NewMetrics,
 			metrics.NewInterceptor,
+			mongodb.NewMongoStorage,
+			localdb.NewLocalStorage,
+			repository.NewTemplateRepository,
 			func() string {
 				return configPath
 			},
@@ -44,6 +51,12 @@ func Setup(configPath string) (*fx.App, error) {
 			func() *metrics.Config {
 				return cfg.MetricsConfig
 			},
+			func() *mongodb.MongoStorageConfig {
+				return cfg.MongoConfig
+			},
+			func() *localdb.LocalStorageConfig {
+				return cfg.LocalConfig
+			},
 		),
 		fx.Invoke(func(*server.Server) {}),
 		fx.Invoke(func(l *zap.SugaredLogger) {
@@ -51,5 +64,6 @@ func Setup(configPath string) (*fx.App, error) {
 		}),
 		fx.Invoke(func(*tracer.Tracer) {}),
 		fx.Invoke(func(metrics.MetricsRegistry) {}),
+		fx.Invoke(func(*mongodb.MongoStorage) {}),
 	), nil
 }
