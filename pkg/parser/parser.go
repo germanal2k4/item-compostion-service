@@ -11,10 +11,12 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"item_compositiom_service/pkg/logger"
+	"item_compositiom_service/pkg/metrics"
 	"item_compositiom_service/pkg/provider"
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 )
 
 type contextKey string
@@ -26,12 +28,19 @@ const (
 type TemplateLib struct {
 	mu        sync.RWMutex
 	providers map[string]provider.Provider
+	metrics   *metricsCollector
 }
 
-func NewTemplateLib() *TemplateLib {
+func NewTemplateLib(metricsRegistry metrics.MetricsRegistry) (*TemplateLib, error) {
+	metrics, err := newMetricsCollector(metricsRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metrics collector: %w", err)
+	}
+
 	return &TemplateLib{
 		providers: make(map[string]provider.Provider),
-	}
+		metrics:   metrics,
+	}, nil
 }
 
 func (t *TemplateLib) RegisterProvider(p provider.Provider) {
@@ -49,6 +58,9 @@ type Instruction struct {
 }
 
 func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) {
+	startTime := time.Now()
+	t.metrics.parseRequestCount.WithLabelValues().Inc()
+
 	var tmpInstructions []Instruction
 	decoder := yaml.NewDecoder(bytes.NewReader(templateData))
 
@@ -59,6 +71,7 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			if errors.Is(err, io.EOF) {
 				break
 			}
+			t.metrics.errorsCount.WithLabelValues("parse_error", "yaml_decode_error").Inc()
 			return nil, fmt.Errorf("error parsing YAML: %w", err)
 		}
 
@@ -66,11 +79,13 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 			parser := provider.NewGRPCProviderParser()
 			spec, err := parser.Parse(templateData)
 			if err != nil {
+				t.metrics.errorsCount.WithLabelValues("provider_parse_error", "provider_spec_error").Inc()
 				return nil, fmt.Errorf("error parsing provider spec: %w", err)
 			}
 
 			grpcProvider, err := provider.NewGRPCProvider(spec)
 			if err != nil {
+				t.metrics.errorsCount.WithLabelValues("provider_create_error", "provider_init_error").Inc()
 				return nil, fmt.Errorf("error creating provider: %w", err)
 			}
 
@@ -83,13 +98,17 @@ func (t *TemplateLib) ParseTemplate(templateData []byte) ([]Instruction, error) 
 				instr.If = ifCondition
 			}
 		}
+
 		tmpInstructions = append(tmpInstructions, instr)
 	}
 
+	t.metrics.parseTime.WithLabelValues().Observe(time.Since(startTime).Seconds())
 	return tmpInstructions, nil
 }
 
 func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, instructions []Instruction) ([]byte, error) {
+	startTime := time.Now()
+	t.metrics.adjustRequestCount.WithLabelValues().Inc()
 
 	templateSet := t.findApplicableTemplate(ctx, instructions, item)
 
@@ -101,9 +120,11 @@ func (t *TemplateLib) AdjustTemplate(ctx context.Context, item map[string]any, i
 
 	finalJSON, err := json.MarshalIndent(combinedResult, "", "  ")
 	if err != nil {
+		t.metrics.errorsCount.WithLabelValues("adjust_error", "json_marshal_error").Inc()
 		return nil, fmt.Errorf("error marshaling final result: %w", err)
 	}
 
+	t.metrics.adjustTime.WithLabelValues().Observe(time.Since(startTime).Seconds())
 	return finalJSON, nil
 }
 
