@@ -60,3 +60,23 @@ services:
       - xpack.security.enabled=false
     ports:
       - "9200:9200"
+
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password
+    healthcheck:
+      test: mongosh --eval "db.stats()"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
