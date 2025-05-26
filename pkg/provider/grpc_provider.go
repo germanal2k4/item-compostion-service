@@ -2,20 +2,38 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"net"
+	"sync"
+	"time"
+
 	"github.com/PaesslerAG/gval"
+	"github.com/jhump/protoreflect/desc/protoparse"
+	"github.com/jhump/protoreflect/dynamic"
+	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"net"
-	"time"
 )
 
+var ErrrorNoMatch = errors.New("value doesn't match")
+
 type GRPCProvider struct {
+	mu      sync.Mutex
 	spec    *ProviderSpec
 	conn    *grpc.ClientConn
 	methods map[string]*MethodConfig
 	retry   *RetryConfig
+
+	protoSet   bool
+	msgFactory *dynamic.MessageFactory
+	stub       grpcdynamic.Stub
 }
 
 func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
@@ -38,7 +56,6 @@ func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
 		method := &spec.Spec.Methods[i]
 		methods[method.Method] = method
 	}
-
 	retryConfig := &RetryConfig{
 		MaxAttempts:       3,
 		InitialBackoff:    time.Second,
@@ -49,14 +66,55 @@ func NewGRPCProvider(spec *ProviderSpec) (*GRPCProvider, error) {
 
 	return &GRPCProvider{
 		spec:    spec,
-		conn:    conn,
 		methods: methods,
+		conn:    conn,
 		retry:   retryConfig,
+		stub:    grpcdynamic.NewStub(conn),
 	}, nil
 }
 
 func (p *GRPCProvider) GetName() string {
 	return p.spec.Metadata.Name
+}
+
+func (p *GRPCProvider) SetProto(proto []byte) error {
+	filename := p.spec.Metadata.Name + ".proto"
+	parser := protoparse.Parser{
+		Accessor: protoparse.FileContentsFromMap(map[string]string{
+			filename: string(proto),
+		}),
+	}
+
+	fds, err := parser.ParseFiles(filename)
+	if err != nil {
+		return fmt.Errorf("failed to parse proto: %w", err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, method := range p.methods {
+		service := fds[0].FindService(method.Service)
+		if service == nil {
+			return fmt.Errorf("service %s not found in proto", method.Service)
+		}
+
+		method.desc = service.FindMethodByName(method.Method)
+		if method.desc == nil {
+			return fmt.Errorf("method %s not found in proto", method.Method)
+		}
+
+		file := method.desc.GetFile().AsFileDescriptorProto()
+		fd, err := protodesc.NewFile(file, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create file descriptor for method %s: %w", method.Method, err)
+		}
+
+		method.inputMD = fd.Messages().ByName(protoreflect.Name(method.desc.GetInputType().GetName()))
+	}
+	p.msgFactory = dynamic.NewMessageFactoryWithDefaults()
+
+	p.protoSet = true
+	return nil
 }
 
 func (p *GRPCProvider) GetMethod(methodName string) (*MethodConfig, error) {
@@ -79,7 +137,7 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 			return nil, fmt.Errorf("failed to evaluate filter: %w", err)
 		}
 		if !matches {
-			return nil, nil
+			return nil, ErrrorNoMatch
 		}
 	}
 
@@ -130,8 +188,28 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 }
 
 func (p *GRPCProvider) executeGRPCCall(ctx context.Context, method *MethodConfig, data map[string]interface{}) (interface{}, error) {
-	// TODO: Implement actual gRPC call based on method configuration
-	return nil, fmt.Errorf("not implemented")
+	rd := dynamicpb.NewMessage(method.inputMD)
+
+	if err := mapToDynamic(rd, data); err != nil {
+		return nil, fmt.Errorf("заполнение сообщения: %w", err)
+	}
+
+	responseMsg, err := p.stub.InvokeRpc(
+		ctx,
+		method.desc,
+		rd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to invoke gRPC method: %w", err)
+	}
+
+	jsonResponse, _ := responseMsg.(*dynamic.Message).MarshalJSON()
+	var res interface{}
+	if err := json.Unmarshal(jsonResponse, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return res, nil
 }
 
 func (p *GRPCProvider) evaluateFilter(condition string, data map[string]interface{}) (bool, error) {
@@ -158,4 +236,14 @@ func (p *GRPCProvider) Close() error {
 		return p.conn.Close()
 	}
 	return nil
+}
+
+func mapToDynamic(msg *dynamicpb.Message, data map[string]interface{}) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	u := protojson.UnmarshalOptions{DiscardUnknown: false}
+	return u.Unmarshal(raw, msg)
 }

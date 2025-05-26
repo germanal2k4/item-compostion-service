@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,17 @@ func (p *GRPCProviderParser) Parse(data []byte) (*ProviderSpec, error) {
 
 	if err := p.Validate(&spec); err != nil {
 		return nil, fmt.Errorf("invalid provider spec: %w", err)
+	}
+
+	if spec.Spec.Payload.Headers != nil {
+		for k, v := range spec.Spec.Payload.Headers {
+			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+				envVar := strings.TrimSuffix(strings.TrimPrefix(v, "${"), "}")
+				if value := os.Getenv(envVar); value != "" {
+					spec.Spec.Payload.Headers[k] = value
+				}
+			}
+		}
 	}
 
 	return &spec, nil
@@ -71,7 +83,11 @@ func (p *GRPCProviderParser) validatePayload(payload *PayloadConfig) error {
 		return fmt.Errorf("headers are required")
 	}
 
-	for _, value := range payload.Headers {
+	for key, value := range payload.Headers {
+		if key == "" {
+			return fmt.Errorf("header key cannot be empty")
+		}
+
 		if strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}") {
 			envVar := strings.TrimSuffix(strings.TrimPrefix(value, "${"), "}")
 			if os.Getenv(envVar) == "" {
@@ -109,33 +125,53 @@ func (p *GRPCProviderParser) validateMethods(methods []MethodConfig) error {
 			return fmt.Errorf("method[%d].timeout must be positive", i)
 		}
 
-		if err := p.validateRequest(&method.Request); err != nil {
-			return fmt.Errorf("method[%d].request: %w", i, err)
+		if err := p.validateFilter(&method.Filter); err != nil {
+			return fmt.Errorf("method[%d].filter: %w", i, err)
 		}
 
-		if err := p.validateResponse(&method.Response); err != nil {
-			return fmt.Errorf("method[%d].response: %w", i, err)
+		if err := p.validateRequestResponse(method.Request, "request", i); err != nil {
+			return err
+		}
+
+		if err := p.validateRequestResponse(method.Response, "response", i); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (p *GRPCProviderParser) validateRequest(request *RequestConfig) error {
-	if request.Domain == "" {
-		return fmt.Errorf("domain is required")
+func (p *GRPCProviderParser) validateFilter(filter *FilterConfig) error {
+	if filter.If == "" {
+		return nil
 	}
 
-	if request.DomainIDs == "" {
-		return fmt.Errorf("domain_ids is required")
+	validExpr := regexp.MustCompile(`^[a-zA-Z0-9\s\.\(\)\+\-\*\/\>\<\=\!\&\|\:\"\'\,\[\]\{\}]+$`)
+	if !validExpr.MatchString(filter.If) {
+		return fmt.Errorf("invalid filter expression: %s", filter.If)
 	}
 
 	return nil
 }
 
-func (p *GRPCProviderParser) validateResponse(response *ResponseConfig) error {
-	if response.ItemID == "" {
-		return fmt.Errorf("itemId is required")
+func (p *GRPCProviderParser) validateRequestResponse(mapping map[string]string, kind string, methodIndex int) error {
+	if mapping == nil {
+		return fmt.Errorf("method[%d].%s is required", methodIndex, kind)
+	}
+
+	for field, path := range mapping {
+		if field == "" {
+			return fmt.Errorf("method[%d].%s: field name cannot be empty", methodIndex, kind)
+		}
+
+		if path == "" {
+			return fmt.Errorf("method[%d].%s: path for field %s cannot be empty", methodIndex, kind, field)
+		}
+
+		validPath := regexp.MustCompile(`^[a-zA-Z0-9\.\[\]\"\']+$`)
+		if !validPath.MatchString(path) {
+			return fmt.Errorf("method[%d].%s: invalid path expression for field %s: %s", methodIndex, kind, field, path)
+		}
 	}
 
 	return nil
