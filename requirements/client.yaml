@@ -1,0 +1,30 @@
+version: v1
+kind: ProviderGRPC
+metadata:
+  name: reaction # Имя провайдера по которому будут с ним взаимодействовать (внутренняя логика)
+  labels:
+    foo: bar # Свободный список полей
+spec:
+  transport:
+    address: reaction.tbank.ru:443 # Адрес сервера
+    timeout: 1s # Таймаут на транспорт
+    logging:
+      enabled: true
+  payload:
+    headers: # Заголовки которые будут добавлены в запрос
+      x-api-key: ${PLANET_REACTION_API_KEY} # Можно получить значение из переменных окружения
+      x-app-name: my-application # Либо может быть задано статичное значение
+
+  methods:
+    - package: reaction.internal
+      service: ReactionInternalService
+      method: GetReactionCountersByDomainId
+      type: DomainBatch # Тип метода (Batch, DomainBatch, Item)
+      timeout: 1s # Переопределение глобального таймаута
+      filter:
+        if: 'item.createdAt > time.Now - 7 * time.Day' # выражение по которому будут фильтроваться объекты по которым нужно запрашивать данные в мастер системе
+      request:
+        domain: item.domain
+        domain_ids: item.id
+      response:
+        itemId: items.domain_id

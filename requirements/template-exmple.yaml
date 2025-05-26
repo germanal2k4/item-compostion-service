@@ -1,0 +1,79 @@
+kind: View
+version: v1
+metadata:
+  name: post-card-default
+spec:
+  contentType: "post"
+  template:
+    templates: [ "default-card" ]
+
+---
+kind: View
+version: v1
+metadata:
+  name: post-card-premium
+spec:
+  contentType: "post"
+  if: owner.subscription.type == "premium"
+  template:
+    templates: [ "default-card", "premium-card" ]
+
+---
+kind: Template
+version: v1
+metadata:
+  name: premium-card
+spec:
+  value:
+    premium:
+      type: "bool"
+      value: true
+
+---
+kind: Template
+version: v1
+metadata:
+  name: default-card
+spec:
+  value:
+    id:
+      type: "string"
+      path: item.id
+    type:
+      type: "string"
+      path: item.type
+    content:
+      type: "object"
+      value:
+        title:
+          type: "string"
+          path: item.title
+        text:
+          type: "string"
+          path: item.body
+        selfLink:
+          type: "string"
+          value:  "https://tbank.ru/posts/{{item.id}}"
+    buttons:
+      type: "array"
+      value:
+        - type: "object"
+          value:
+            text:
+              type: "string"
+              value: "Like"
+            count:
+              type: "number"
+              path: reaction.total_count
+            link:
+              type: "string"
+              value: "https://tbank.ru/reactions?itemId={{item.id}}&itemType={{item.type}}"
+        - type: "object"
+          if: item.ownerId == context.userId
+          value:
+            type:
+              type: "string"
+              value: "button_post_delete"
+            text:
+              type: "string"
+              value: "Удалить"

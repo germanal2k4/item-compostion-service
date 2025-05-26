@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package item_composition.api.v1;
+
+import "google/protobuf/struct.proto";
+
+service ItemCompositionService {
+  rpc GetItems(GetItemsRequest) returns (GetItemsResponse) {}
+}
+
+message GetItemsRequest {
+  repeated ItemMeta items = 1;
+  google.protobuf.Struct metadata = 2;
+}
+
+message GetItemsResponse {
+  repeated Item items = 1;
+}
+
+message Key {
+  string id = 1;
+  string type = 2;
+}
+
+message ItemMeta {
+  Key key = 1;
+  google.protobuf.Struct metadata = 2;
+}
+
+message Item {
+  Key key = 1;
+  bytes data = 2;
+}
