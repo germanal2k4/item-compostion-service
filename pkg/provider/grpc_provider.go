@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -20,6 +21,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
+
+var ErrrorNoMatch = errors.New("value doesn't match")
 
 type GRPCProvider struct {
 	mu      sync.Mutex
@@ -134,7 +137,7 @@ func (p *GRPCProvider) ExecuteMethod(ctx context.Context, methodName string, dat
 			return nil, fmt.Errorf("failed to evaluate filter: %w", err)
 		}
 		if !matches {
-			return nil, nil
+			return nil, ErrrorNoMatch
 		}
 	}
 

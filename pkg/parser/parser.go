@@ -249,15 +249,30 @@ func (t *TemplateLib) applyNestedObject(ctx context.Context, key string, val map
 
 func (t *TemplateLib) processStringValue(ctx context.Context, key string, val map[string]any, result map[string]any, item map[string]any) error {
 	var errList []error
-	contextAny := ctx.Value(DataKey).(map[string]any)
 	if pathValue, exists := val["path"]; exists {
 		pathStr, ok := pathValue.(string)
 		if !ok {
 			errList = append(errList, fmt.Errorf("path value is not a string for key: %s", key))
 		} else {
+			var p provider.Provider
+			if !strings.HasPrefix(pathStr, "item") {
+				pathes := strings.Split(pathStr, ".")
+				var err error
+
+				p, err = t.storage.GetProvider(pathes[0])
+				if err != nil {
+					return fmt.Errorf("Failed to get provider for path: %s", pathStr)
+				}
+
+				res, err := p.ExecuteMethod(ctx, pathStr, item)
+				if err != nil {
+					return fmt.Errorf("Failed to execute method for path: %s", pathStr)
+				}
+				item = res.(map[string]any)
+			}
+
 			resolvedValue, err := gval.Evaluate(pathStr, map[string]interface{}{
-				"item":    item,
-				"context": contextAny,
+				"item": item,
 			})
 			if err != nil {
 				errList = append(errList, fmt.Errorf("error resolving path for key %s: %w", key, err))
@@ -296,10 +311,25 @@ func (t *TemplateLib) processNumberValue(ctx context.Context, key string, val ma
 		logger.FromContext(ctx).With("component", "template_lib").Warn("Path value is not a string for key: %s", key)
 		return
 	}
-	contextAny := ctx.Value(DataKey).(map[string]any)
+	if !strings.HasPrefix(pathStr, "item") {
+		pathes := strings.Split(pathStr, ".")
+
+		p, err := t.storage.GetProvider(pathes[0])
+		if err != nil {
+			logger.FromContext(ctx).With("component", "template_lib").Error("No such provider: %s", err)
+			return
+		}
+
+		res, err := p.ExecuteMethod(ctx, pathStr, item)
+		if err != nil {
+			logger.FromContext(ctx).With("component", "template_lib").Error("No such method: %s", err)
+			return
+		}
+		item = res.(map[string]any)
+	}
+
 	resolvedValue, err := gval.Evaluate(pathStr, map[string]interface{}{
-		"item":    item,
-		"context": contextAny,
+		"item": item,
 	})
 	if err != nil {
 		logger.FromContext(ctx).With("component", "template_lib").Warn("Error resolving path for key %s: %v", key, err)
@@ -350,11 +380,9 @@ func (t *TemplateLib) processArrayValue(ctx context.Context, key string, val map
 	result[key] = processed
 }
 
-func (t *TemplateLib) interpolateString(ctx context.Context, templateStr string, item map[string]any) (string, error) {
-	contextAny, _ := ctx.Value(DataKey).(map[string]any)
+func (t *TemplateLib) interpolateString(_ context.Context, templateStr string, item map[string]any) (string, error) {
 	tmpl, err := template.New("interpolation").Funcs(template.FuncMap{
-		"item":    func() map[string]any { return item },
-		"context": func() map[string]any { return contextAny },
+		"item": func() map[string]any { return item },
 	}).Parse(templateStr)
 	if err != nil {
 		return templateStr, fmt.Errorf("error parsing template: %w", err)
@@ -367,11 +395,9 @@ func (t *TemplateLib) interpolateString(ctx context.Context, templateStr string,
 	return buf.String(), nil
 }
 
-func (t *TemplateLib) evaluateCondition(ctx context.Context, condition string, item map[string]any) (bool, error) {
-	contextAny := ctx.Value(DataKey).(map[string]any)
+func (t *TemplateLib) evaluateCondition(_ context.Context, condition string, item map[string]any) (bool, error) {
 	params := map[string]interface{}{
-		"item":    item,
-		"context": contextAny,
+		"item": item,
 	}
 
 	if err := t.validateKeys(condition, params); err != nil {

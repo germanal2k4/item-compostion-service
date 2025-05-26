@@ -5,6 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"item_compositiom_service/pkg/metrics"
+	"item_compositiom_service/pkg/provider"
 	"testing"
 )
 
@@ -24,7 +25,8 @@ func (m *mockMetricsRegistry) GetRegistry() prometheus.Registerer {
 
 func setupTestTemplateLib(t *testing.T) *TemplateLib {
 	registry := newMockMetricsRegistry()
-	templateLib, err := NewTemplateLib(registry)
+	storage := provider.NewProviderStorage()
+	templateLib, err := NewTemplateLib(registry, storage)
 	assert.NoError(t, err)
 	return templateLib
 }
@@ -198,7 +200,7 @@ spec:
 }
 
 func TestEvaluateCondition_Success(t *testing.T) {
-	item := map[string]any{"id": 42, "active": true}
+	item := map[string]any{"id": 42, "active": true, "limit": 50}
 	data := map[string]any{"limit": 50}
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, DataKey, data)
@@ -211,9 +213,9 @@ func TestEvaluateCondition_Success(t *testing.T) {
 		{"item.id == 100", false},
 		{"item.active", true},
 		{"item.active == false", false},
-		{"item.id < 100 && context.limit == 50", true},
-		{"item.id > 100 || context.limit < 10", false},
-		{"(item.id > 0) && (context.limit == 50)", true},
+		{"item.id < 100", true},
+		{"item.id > 100 || item.limit < 10", false},
+		{"(item.id > 0) && (item.limit == 50)", true},
 	}
 
 	for _, tc := range tests {
